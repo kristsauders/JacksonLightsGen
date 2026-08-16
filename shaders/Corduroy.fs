@@ -1,0 +1,43 @@
+/*{
+  "CREDIT": "written for the Auders 2026 show",
+  "CATEGORIES": ["2d", "generator", "texture"],
+  "DESCRIPTION": "Ribbed corduroy with a sheen that travels along the ribs. Directional but even -- every part of the canvas looks like every other part, which is what lets it run house-wide.",
+  "INPUTS": [
+    { "NAME": "rate",  "TYPE": "float", "DEFAULT": 0.35, "MIN": -1.5, "MAX": 1.5 },
+    { "NAME": "ribs",  "TYPE": "float", "DEFAULT": 9.0,  "MIN": 3.0,  "MAX": 28.0 },
+    { "NAME": "sheen", "TYPE": "float", "DEFAULT": 0.6,  "MIN": 0.0,  "MAX": 1.0 },
+    { "NAME": "depth", "TYPE": "float", "DEFAULT": 0.5,  "MIN": 0.1,  "MAX": 1.0 }
+  ,
+    { "NAME": "c1", "TYPE": "color", "DEFAULT": [1.0, 1.0, 1.0, 1.0] },
+    { "NAME": "c2", "TYPE": "color", "DEFAULT": [1.0, 1.0, 1.0, 1.0] },
+    { "NAME": "c3", "TYPE": "color", "DEFAULT": [1.0, 1.0, 1.0, 1.0] }
+  ]
+}*/
+// c1/c2/c3 are fed from the xLights palette (slots 1-3, in declaration
+// order) -- see colorize_shaders.py for how that was established.
+vec3 palcol(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return mix(mix(c1.rgb, c2.rgb, smoothstep(0.0, 0.55, t)),
+               c3.rgb, smoothstep(0.55, 1.0, t));
+}
+// Where in the palette this pixel sits: a slow diagonal drift, nudged by the
+// shader's own value so bright detail still leans toward the palette's top
+// end. Weighted toward the drift because value alone is invisible -- alpha
+// hides exactly the part of the ramp that value would have shown.
+float palpos(vec2 uv, float v) {
+    float drift = 0.5 + 0.5 * sin((uv.x * 1.6 + uv.y * 1.1) * 2.1 - TIME * 0.11);
+    return clamp(mix(drift, v, 0.35), 0.0, 1.0);
+}
+
+void main() {
+    vec2 uv = isf_FragNormCoord;
+    float t = TIME * rate;
+    float r = fract(uv.x * ribs);
+    // Rounded rib cross-section: bright along the crown, dark in the valley.
+    float crown = pow(sin(r * 3.14159), mix(1.0, 4.0, depth));
+    // A highlight sliding along the length of every rib together.
+    float travel = 0.5 + 0.5 * sin(uv.y * 3.0 - t * 2.0 + floor(uv.x * ribs) * 0.4);
+    float v = crown * mix(1.0, travel, sheen);
+    float _pv = clamp(v, 0.0, 1.0);
+    gl_FragColor = vec4(palcol(palpos(isf_FragNormCoord, _pv)), _pv);
+}
