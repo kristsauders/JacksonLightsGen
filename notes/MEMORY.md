@@ -1,0 +1,5 @@
+- [xlights-show-setup](xlights_show_setup.md) — where scripts/data live for the iterative 2026 show build; why we bypass the MCP server's "auto" mode
+- [xlights-environment-fixes](xlights_environment_fixes.md) — Intel-Mac numpy/torch/madmom/demucs dependency fix, already applied to pyproject.toml
+- [xlights-human-sequence-patterns](xlights_human_sequence_patterns.md) — **read before generating any sequence**: measured spec from Krists's real sequences (target groups not models, buffer styles, 11-26% lit, short effects, validated settings strings)
+- [xlights-sequencing-technique-learnings](xlights_sequencing_technique_learnings.md) — chroma vs pyin, riser/implosion detection tuning, cross-model chase pattern
+- [feedback-xlights-creative-direction](feedback_xlights_creative_direction.md) — what Krists wants from sequences (melody chases, sweeps, implosions, detail accents) and how he likes to iterate
