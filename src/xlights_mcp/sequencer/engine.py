@@ -65,28 +65,28 @@ EFFECT_VARIANTS: dict[str, list[dict[str, str]]] = {
          "E_CHOICE_Chase_Type1": "Left-Right", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
+         "E_TEXTCTRL_Chase_Rotations": "1"},
     ],
     "Chase_right": [
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Right-Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
+         "E_TEXTCTRL_Chase_Rotations": "1"},
     ],
     "Chase_from_middle": [
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "From Middle", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
+         "E_TEXTCTRL_Chase_Rotations": "1"},
     ],
     "Chase_bounce": [
         {"B_CHOICE_BufferStyle": "Per Model Single Line", "E_CHECKBOX_Chase_Group_All": "0",
          "E_CHOICE_Chase_Type1": "Bounce from Left", "E_CHOICE_Fade_Type": "None",
          "E_CHOICE_SingleStrand_Colors": "Palette", "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
          "E_SLIDER_Color_Mix1": "36", "E_SLIDER_Number_Chases": "1",
-         "E_SLIDER_Chase_Rotations": "1"},
+         "E_TEXTCTRL_Chase_Rotations": "1"},
     ],
     "Morph_quick": [
         {"E_CHECKBOX_Morph_End_Link": "0", "E_CHECKBOX_Morph_Start_Link": "0",
@@ -191,6 +191,18 @@ EFFECT_VARIANTS: dict[str, list[dict[str, str]]] = {
          "E_SLIDER_Marquee_Speed": "3", "E_SLIDER_Marquee_Stagger": "0"},
     ],
     "On_solid": [{}],
+    # Settings copied verbatim from a real production sequence (Cold Heart
+    # PNAU Remix, "Orbs" matrix group) -- "Music Circle" movement drives the
+    # effect's motion live from the audio, so it reads as rhythmic without
+    # needing per-beat manual placement. Safe to reuse as-is (no guessed keys).
+    "Tendril_music": [
+        {"E_CHOICE_Tendril_Movement": "Music Circle", "E_TEXTCTRL_Tendril_Dampening": "10",
+         "E_TEXTCTRL_Tendril_Friction": "10", "E_TEXTCTRL_Tendril_Length": "60",
+         "E_TEXTCTRL_Tendril_Speed": "10", "E_TEXTCTRL_Tendril_Tension": "20",
+         "E_TEXTCTRL_Tendril_Thickness": "3", "E_TEXTCTRL_Tendril_Trails": "4",
+         "E_TEXTCTRL_Tendril_TuneMovement": "14", "E_TEXTCTRL_Tendril_XOffset": "0",
+         "E_TEXTCTRL_Tendril_YOffset": "0"},
+    ],
 }
 
 
@@ -206,6 +218,8 @@ BED_EFFECTS: dict[str, list[str]] = {
     "poly_line": ["ColorWash_slow", "Twinkle_ambient"],
     "window": ["ColorWash_slow", "On_solid"],
     "custom": ["Twinkle_ambient", "ColorWash_slow", "Butterfly_gentle"],
+    "matrix": ["Tendril_music", "Twinkle_ambient", "ColorWash_slow"],
+    "icicle": ["Twinkle_ambient", "ColorWash_slow"],
     "other": ["ColorWash_slow", "Twinkle_ambient"],
 }
 
@@ -217,6 +231,8 @@ MOTION_EFFECTS: dict[str, list[str]] = {
     "poly_line": ["Chase_left", "Chase_right", "Chase_from_middle"],
     "window": ["Marquee_default"],
     "custom": ["Plasma_fast", "Warp_mirror", "Warp_wavy"],
+    "matrix": ["Tendril_music", "Plasma_fast", "Warp_wavy", "Warp_mirror"],
+    "icicle": ["Meteors_rain", "Twinkle_dense", "ColorWash_fast"],
     "other": ["Chase_from_middle", "ColorWash_fast"],
 }
 
@@ -228,6 +244,8 @@ ACCENT_EFFECTS: dict[str, list[str]] = {
     "poly_line": ["Morph_quick"],
     "window": ["Shockwave_hit"],
     "custom": ["Shockwave_hit", "Morph_quick"],
+    "matrix": ["Shockwave_hit", "Morph_quick"],
+    "icicle": ["Shockwave_hit"],
     "other": ["Shockwave_hit"],
 }
 
@@ -249,6 +267,8 @@ STEM_MOTION_OVERRIDES: dict[str, dict[str, list[str]]] = {
         "poly_line": ["Chase_left", "Chase_right"],
         "window": ["Marquee_default"],
         "custom": ["Plasma_fast", "Warp_wavy"],
+        "matrix": ["Tendril_music", "Plasma_fast"],
+        "icicle": ["Meteors_rain"],
         "other": ["Chase_from_middle", "ColorWash_fast"],
     },
     "bass": {
@@ -258,6 +278,8 @@ STEM_MOTION_OVERRIDES: dict[str, dict[str, list[str]]] = {
         "poly_line": ["ColorWash_fast"],
         "window": ["ColorWash_fast"],
         "custom": ["Plasma_slow", "Warp_mirror"],
+        "matrix": ["Plasma_slow", "Tendril_music"],
+        "icicle": ["ColorWash_fast"],
         "other": ["ColorWash_fast"],
     },
     "vocals": {
@@ -267,6 +289,8 @@ STEM_MOTION_OVERRIDES: dict[str, dict[str, list[str]]] = {
         "poly_line": ["ColorWash_slow"],
         "window": ["ColorWash_slow"],
         "custom": ["Butterfly_gentle", "Twinkle_ambient"],
+        "matrix": ["Twinkle_ambient", "ColorWash_slow"],
+        "icicle": ["Twinkle_ambient"],
         "other": ["ColorWash_slow"],
     },
     "other": {
@@ -276,6 +300,8 @@ STEM_MOTION_OVERRIDES: dict[str, dict[str, list[str]]] = {
         "poly_line": ["Chase_left", "Chase_right"],
         "window": ["Marquee_default"],
         "custom": ["Plasma_fast", "Warp_wavy", "Warp_mirror"],
+        "matrix": ["Tendril_music", "Warp_wavy"],
+        "icicle": ["Meteors_rain"],
         "other": ["Chase_from_middle"],
     },
 }
@@ -348,8 +374,20 @@ def _detect_model_groups(
         group_categories: dict[str, str] = {}
         grouped_names: set[str] = set()
 
-        for mg in show_config.model_groups:
-            members = [model_by_name[n] for n in mg.members if n in model_by_name]
+        # xLights groups overlap heavily and hierarchically (e.g. "Arches"
+        # is a subset of "ALL Roof" is a subset of "ALL House"). Process
+        # smallest-first and skip already-claimed models, so a model is
+        # placed in exactly one group -- the most specific one it belongs
+        # to -- instead of getting effects placed redundantly once per
+        # overlapping group (which both bloats effect count/density and
+        # wastes the broad catch-all groups on leftovers instead of the
+        # specific groups that are actually useful for sequencing).
+        candidates = sorted(show_config.model_groups, key=lambda mg: len(mg.members))
+        for mg in candidates:
+            members = [
+                model_by_name[n] for n in mg.members
+                if n in model_by_name and n not in grouped_names
+            ]
             if len(members) >= 2:
                 groups[mg.name] = members
                 grouped_names.update(m.name for m in members)
@@ -358,14 +396,36 @@ def _detect_model_groups(
                 group_categories[mg.name] = max(set(cats), key=cats.count)
 
         if groups:
-            ungrouped = [m for m in models if m.name not in grouped_names]
             logger.info(f"Using {len(groups)} xLights-defined model groups")
-            return groups, ungrouped, group_categories
+            # --- Strategy 2, applied only to what Strategy 1 left uncovered ---
+            # xLights groups can go stale relative to the physical layout (a
+            # show's groups may still reference a legacy single model that's
+            # since been replaced by several individually-named panels, e.g.
+            # "Curtain Garage" the old model vs. "Curtain Garage 1".."Curtain
+            # Garage-5" the real panels that replaced it -- the group never got
+            # updated). Without this, anything an xLights group doesn't cover
+            # falls through to fully individual treatment, silently losing the
+            # spatial-family info that DOES exist in the naming pattern.
+            leftover = [m for m in models if m.name not in grouped_names]
+            prefix_groups, still_ungrouped, prefix_categories = _prefix_group_models(leftover)
+            if prefix_groups:
+                logger.info(f"Also found {len(prefix_groups)} prefix-based groups among leftovers")
+            groups.update(prefix_groups)
+            group_categories.update(prefix_categories)
+            return groups, still_ungrouped, group_categories
 
-    # --- Strategy 2: Automatic common-prefix grouping ---
-    # Group models that share a common prefix (e.g. "Left Cane 1", "Left Cane 2" → "left_cane")
-    groups = {}
-    group_categories = {}
+    # --- Strategy 2 only: no xLights groups exist at all ---
+    groups, ungrouped, group_categories = _prefix_group_models(models)
+    logger.info(f"Auto-detected {len(groups)} model groups by common prefix")
+    return groups, ungrouped, group_categories
+
+
+def _prefix_group_models(
+    models: list[LightModel],
+) -> tuple[dict[str, list[LightModel]], list[LightModel], dict[str, str]]:
+    """Group models that share a common prefix (e.g. "Left Cane 1", "Left Cane 2" → "left_cane")."""
+    groups: dict[str, list[LightModel]] = {}
+    group_categories: dict[str, str] = {}
     grouped_names: set[str] = set()
 
     prefix_buckets: dict[str, list[LightModel]] = {}
@@ -384,7 +444,6 @@ def _detect_model_groups(
             group_categories[group_key] = max(set(cats), key=cats.count)
 
     ungrouped = [m for m in models if m.name not in grouped_names]
-    logger.info(f"Auto-detected {len(groups)} model groups by common prefix")
     return groups, ungrouped, group_categories
 
 
@@ -966,6 +1025,7 @@ def _effect_name_from_key(variant_key: str) -> str:
         "Warp_mirror": "Warp",
         "Warp_wavy": "Warp",
         "Marquee_default": "Marquee",
+        "Tendril_music": "Tendril",
         "On_solid": "On",
     }
     return key_to_effect.get(variant_key, variant_key.split("_")[0])

@@ -62,11 +62,42 @@ def detect_structure(audio_path: Path, sr: int = 22050) -> list[SongSection]:
     boundary_frames = _detect_boundaries(novelty, min_section_frames=15, peak_threshold=0.1)
     boundary_times = librosa.frames_to_time(boundary_frames, sr=sr).tolist()
 
-    # If we got too few sections, fall back to energy-based segmentation
+    # If we got too few sections, fall back to energy-based segmentation.
+    #
+    # A raw COUNT check alone is not sufficient: novelty boundaries can
+    # cluster entirely in one short stretch (a fade-out/ending is spectrally
+    # very different from the rest of the track and produces a burst of
+    # boundaries there) while satisfying the count threshold, leaving the
+    # rest of the song -- sometimes 90%+ of it -- as one giant undifferentiated
+    # block. Confirmed on a real track: 13 boundaries found (>= the count-of-8
+    # threshold), but 11 of them fell inside the final 6 seconds of fade-out;
+    # the preceding 235 seconds (97% of the song) had zero internal
+    # boundaries and became a single section. Downstream, that means no
+    # verse/chorus energy variation, no climax to identify, and a palette/
+    # density story that's uniform for the entire track -- exactly the "wall-
+    # to-wall sameness" failure this whole generation pipeline exists to
+    # avoid, just introduced one layer up from where it's usually caught.
+    #
+    # Fix: also check the largest GAP between consecutive boundaries (with
+    # the song's start and end as implicit bounds). If any single gap is
+    # unreasonably long, the coverage is bad regardless of the total count,
+    # and energy-based boundaries are merged in (not used as a full
+    # replacement, so genuinely-detected boundaries like the fade-out ones
+    # above are kept) to fill it.
     min_sections = max(4, int(duration / 30))  # at least 1 section per 30s
+    max_gap_s = max(45.0, duration * 0.25)
+    gap_bounds = sorted(set([0.0, *boundary_times, duration]))
+    largest_gap = max((b - a for a, b in zip(gap_bounds, gap_bounds[1:])), default=0.0)
     if len(boundary_times) < min_sections:
         logger.info(f"Novelty found only {len(boundary_times)} boundaries, using energy-based fallback")
         boundary_times = _energy_based_segmentation(y, sr, duration, min_sections)
+    elif largest_gap > max_gap_s:
+        logger.info(
+            f"Novelty boundaries left a {largest_gap:.0f}s gap with no internal "
+            f"structure (> {max_gap_s:.0f}s threshold) -- merging in energy-based "
+            f"boundaries rather than trusting the count alone")
+        energy_boundaries = _energy_based_segmentation(y, sr, duration, min_sections)
+        boundary_times = boundary_times + energy_boundaries
 
     # Ensure start and end
     if not boundary_times or boundary_times[0] > 2.0:
@@ -77,6 +108,21 @@ def detect_structure(audio_path: Path, sr: int = 22050) -> list[SongSection]:
     # Remove duplicates and sort
     boundary_times = sorted(set(round(t, 2) for t in boundary_times))
 
+    # Merge boundaries closer than 1s together so every section has
+    # gap-free coverage. Filtering short segments *after* building them
+    # (dropping the pair instead of merging) leaves multi-second holes with
+    # zero section coverage -- and downstream generators only place ambient
+    # effects within a section's span, so a coverage hole means the lights
+    # go dark/frozen for that stretch while the music keeps playing.
+    if boundary_times:
+        merged = [boundary_times[0]]
+        for t in boundary_times[1:]:
+            if t - merged[-1] >= 1.0:
+                merged.append(t)
+        if merged[-1] != boundary_times[-1]:
+            merged[-1] = boundary_times[-1]  # keep the true end, extend last section
+        boundary_times = merged
+
     # Compute energy per section
     rms = librosa.feature.rms(y=y)[0]
     rms_times = librosa.times_like(rms, sr=sr)
@@ -85,8 +131,6 @@ def detect_structure(audio_path: Path, sr: int = 22050) -> list[SongSection]:
     for i in range(len(boundary_times) - 1):
         start = boundary_times[i]
         end = boundary_times[i + 1]
-        if end - start < 1.0:  # skip tiny sections
-            continue
 
         mask = (rms_times >= start) & (rms_times < end)
         section_energy = float(np.mean(rms[mask])) if np.any(mask) else 0.0

@@ -92,7 +92,7 @@ def _try_madmom_downbeats(audio_path: Path) -> list[float]:
 
         logger.info("Using madmom for downbeat detection")
         act = RNNDownBeatProcessor()(str(audio_path))
-        result = DBNDownBeatTrackingProcessor(fps=100)(act)
+        result = DBNDownBeatTrackingProcessor(beats_per_bar=[3, 4], fps=100)(act)
 
         # result is array of [time, beat_position]
         # downbeats are where beat_position == 1

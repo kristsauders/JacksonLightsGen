@@ -12,6 +12,12 @@ class ColorPalette(BaseModel):
     active_colors: list[int] = Field(default_factory=list)  # which palette slots are active
     sparkle_frequency: int = 0
     sparkle_color: str = ""
+    # Raw extra "C_*=..." parts appended verbatim. xLights keeps value curves
+    # for the Color panel (brightness, hue, saturation) inside the palette
+    # string rather than the effect settings string -- confirmed by grepping
+    # Krists's own finished sequences, where C_VALUECURVE_Brightness appears
+    # immediately before </ColorPalette>. Used for beat-locked brightness.
+    extra_parts: list[str] = Field(default_factory=list)
 
     def to_xlights_string(self) -> str:
         """Serialize to the xLights palette format string."""
@@ -32,6 +38,8 @@ class ColorPalette(BaseModel):
             parts.append(f"C_SLIDER_SparkleFrequency={self.sparkle_frequency}")
         if self.sparkle_color:
             parts.append(f"C_COLOURPICKERCTRL_SparklesColour={self.sparkle_color}")
+
+        parts.extend(self.extra_parts)
 
         return ",".join(parts)
 

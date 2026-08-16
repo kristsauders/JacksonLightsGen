@@ -132,6 +132,14 @@ def full_analysis(
     return analysis
 
 
+# htdemucs output is measured to lag the original mix by ~552 samples at
+# 22050Hz (cross-correlation, consistent to within 1 sample across early/mid/
+# late points in a test track) -- an artifact of the model's internal
+# padding/receptive field, not an analysis bug. Any timestamp derived from a
+# separated stem needs this subtracted to land back on the true mix timeline.
+DEMUCS_OUTPUT_DELAY_SEC = 552 / 22050
+
+
 def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
     """Run onset detection and energy analysis on separated stems.
 
@@ -164,10 +172,12 @@ def analyze_stems(stem_paths: StemPaths, sr: int = 22050) -> StemAnalysis:
                 onset_envelope=onset_env, sr=loaded_sr, backtrack=True
             )
             onset_times = librosa.frames_to_time(onset_frames, sr=loaded_sr).tolist()
+            onset_times = [max(0.0, t - DEMUCS_OUTPUT_DELAY_SEC) for t in onset_times]
 
             # RMS energy curve
             rms = librosa.feature.rms(y=y)[0]
             rms_times = librosa.times_like(rms, sr=loaded_sr).tolist()
+            rms_times = [max(0.0, t - DEMUCS_OUTPUT_DELAY_SEC) for t in rms_times]
             max_rms = float(rms.max()) + 1e-8
             normalized_rms = (rms / max_rms).tolist()
             mean_energy = float(np.mean(rms / max_rms))

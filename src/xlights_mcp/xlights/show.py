@@ -102,11 +102,13 @@ def load_show_models(show_path: Path) -> list[LightModel]:
                     if face_name:
                         face_definitions.append(face_name)
                     continue
-                if child.tag in ("subModel", "strandNames", "nodeNames"):
+                if child.tag == "subModel":
+                    sub_name = child.get("name", "")
+                    if sub_name:
+                        submodels.append(SubModel(name=sub_name, parent=m.get("name", "")))
                     continue
-                child_name = child.get("name", "")
-                if child_name:
-                    submodels.append(SubModel(name=child_name, parent=m.get("name", "")))
+                if child.tag in ("strandNames", "nodeNames"):
+                    continue
 
             pixel_count = 0
             parm1 = m.get("parm1", "0")
@@ -139,7 +141,15 @@ def load_show_models(show_path: Path) -> list[LightModel]:
 
 
 def load_model_groups(show_path: Path) -> list[ModelGroup]:
-    """Parse model groups from xlights_rgbeffects.xml."""
+    """Parse model groups from xlights_rgbeffects.xml.
+
+    Model groups live in their own top-level <modelGroups> element (a
+    sibling of <models>, not nested inside it) -- and a group's "models"
+    list can itself reference other *group* names, not just leaf model
+    names (e.g. "Arches GRP" -> "Arches" -> "Arch 1,Arch 2,Arch 3,Arch 4").
+    This resolves that nesting down to real model names so callers get a
+    flat, usable member list.
+    """
     effects_file = show_path / "xlights_rgbeffects.xml"
     if not effects_file.exists():
         return []
@@ -147,21 +157,68 @@ def load_model_groups(show_path: Path) -> list[ModelGroup]:
     tree = ET.parse(effects_file)
     root = tree.getroot()
     models_elem = root.find("models")
-    if models_elem is None:
+    real_model_names = {m.get("name", "") for m in (models_elem or []) if m.tag == "model"}
+    # Parent model -> its real submodel names, so "Parent/SubName" references
+    # in a group's member list can be checked against what actually exists
+    # rather than assumed valid just because "Parent" exists. Genuinely stale
+    # submodel refs do occur (e.g. a submodel renamed/removed since a group
+    # was built) and silently accepting them produces an orphan Element that
+    # renders as nothing when a sequence targets it.
+    submodels_by_parent: dict[str, set[str]] = {}
+    for m in (models_elem or []):
+        if m.tag != "model":
+            continue
+        subs = {c.get("name", "") for c in m if c.tag == "subModel" and c.get("name")}
+        if subs:
+            submodels_by_parent[m.get("name", "")] = subs
+    model_groups_elem = root.find("modelGroups")
+    if model_groups_elem is None:
         return []
 
+    raw: dict[str, tuple[str, list[str]]] = {}  # name -> (grid_size/layout meta unused here, raw member refs)
+    for g in model_groups_elem:
+        if g.tag != "modelGroup":
+            continue
+        name = g.get("name", "")
+        members_str = g.get("models", "")
+        refs = [n.strip() for n in members_str.split(",") if n.strip()]
+        raw[name] = (g, refs)
+
+    def resolve(name: str, seen: set[str]) -> list[str]:
+        if name in seen or name not in raw:
+            return []
+        seen = seen | {name}
+        _, refs = raw[name]
+        out: list[str] = []
+        for ref in refs:
+            if ref in real_model_names:
+                out.append(ref)
+            elif ref in raw:
+                out.extend(resolve(ref, seen))
+            elif "/" in ref:
+                # A submodel reference, e.g. "Front Center Window Matrix/Verticals"
+                # -- xLights addresses submodels as "ParentModel/SubmodelName" and
+                # groups reference them this way constantly (window outline
+                # verticals/horizontals, snowflake arms/centers/rings/spokes).
+                # Keep the full qualified name only if that submodel actually
+                # exists on that parent right now.
+                parent, sub = ref.split("/", 1)
+                if sub in submodels_by_parent.get(parent, ()):
+                    out.append(ref)
+            # else: stale reference to a model/group/submodel that no longer
+            # exists -- skip
+        return out
+
     groups = []
-    for m in models_elem:
-        if m.tag == "modelGroup":
-            members_str = m.get("models", "")
-            members = [name.strip() for name in members_str.split(",") if name.strip()]
-            group = ModelGroup(
-                name=m.get("name", ""),
-                members=members,
-                grid_size=m.get("GridSize", ""),
-                layout=m.get("layout", ""),
-            )
-            groups.append(group)
+    for name, (elem, _refs) in raw.items():
+        members = resolve(name, set())
+        group = ModelGroup(
+            name=name,
+            members=members,
+            grid_size=elem.get("GridSize", ""),
+            layout=elem.get("layout", ""),
+        )
+        groups.append(group)
 
     logger.info(f"Loaded {len(groups)} model groups from {effects_file}")
     return groups

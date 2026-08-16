@@ -106,7 +106,14 @@ def write_xsq(
 
     # Build unique palettes
     palette_strings: list[str] = []
-    for palette in spec.palettes:
+    # Any palette an effect actually uses is included, not just the ones the
+    # caller happened to declare in spec.palettes. Previously an effect
+    # carrying a palette outside that list hit the ValueError below and had
+    # its `palette` attribute dropped silently -- the effect still rendered,
+    # in the wrong colours, with no error anywhere. That made per-effect
+    # palette variants (e.g. a brightness value curve) impossible to use
+    # without knowing to pre-register every variant up front.
+    for palette in list(spec.palettes) + [e.palette for e in spec.effects if e.palette]:
         ps = palette.to_xlights_string()
         if ps not in palette_strings:
             palette_strings.append(ps)

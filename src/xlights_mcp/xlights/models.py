@@ -52,7 +52,11 @@ class LightModel(BaseModel):
             return "poly_line"
         elif "window" in display:
             return "window"
-        elif "custom" in display:
+        elif "matrix" in display:
+            return "matrix"
+        elif "icicle" in display:
+            return "icicle"
+        elif display in ("custom", "star", "sphere", "circle"):
             return "custom"
         else:
             return "other"
