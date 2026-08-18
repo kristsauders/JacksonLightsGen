@@ -587,6 +587,58 @@ def detect_cymbal_accents(y: np.ndarray, sr: int, cutoff_hz=6000.0):
 # ---------------------------------------------------------------------------
 
 
+def veto_vocal_led(events: list, envs: dict, label: str) -> list:
+    """Drop "drops" that are really just the VOCAL coming back in.
+
+    "At :42 it cuts out and then does a 'drop' at :46 but it's just the vocal
+    coming back in... the vocal does not constitute a drop."
+
+    Both detectors work off a broadband envelope, so they cannot tell WHICH
+    instrument refilled the hole. Measured at Gooey's false drop: the vocal
+    returns 13.7x its in-hole level while the bass comes back at 0.39x -- the
+    band is not back, the singer is. At ENIGMA's real drop the ordering is
+    reversed (drums 32.5x, bass 2.2x, vocals only 3.2x), which is why the test
+    is RELATIVE: reject when the vocal outruns the whole rhythm section.
+
+    Deliberately a veto and not a score. An earlier attempt to boost drops by
+    corroboration fixed one song and broke ENIGMA's double drop; a veto can
+    only ever remove a moment that measurably isn't one.
+
+    Guard: if this would leave a song with NO structural moments at all, the
+    strongest candidate is kept. A song whose drops are genuinely vocal-led
+    (a ballad) should read as understated, not as having no shape whatever.
+    """
+    if not events or len(envs) < 3:
+        return events
+
+    def _med(e, t, a, b):
+        m = (t >= a) & (t < b)
+        return float(np.median(e[m])) if m.any() else 0.0
+
+    kept, vetoed = [], []
+    for d in events:
+        dt = d.get("drop_time")
+        h0 = d.get("dropout_start", d.get("cutout_start"))
+        h1 = d.get("dropout_end", d.get("cutout_end"))
+        if dt is None or h0 is None:
+            kept.append(d)
+            continue
+        r = {}
+        for n, (e, t) in envs.items():
+            hole = _med(e, t, h0, h1)
+            r[n] = _med(e, t, dt, dt + 1.5) / max(hole, 1e-6)
+        rhythm = max(r.get("drums", 0.0), r.get("bass", 0.0))
+        if r.get("vocals", 0.0) > 2.0 * rhythm:
+            d["_rhythm_ratio"] = rhythm
+            vetoed.append(d)
+        else:
+            kept.append(d)
+    if vetoed:
+        print(f"  {label}: vetoed {len(vetoed)} vocal-led (not real drops): "
+              + ", ".join(f"{d['drop_time']:.1f}s" for d in vetoed))
+    return kept, vetoed
+
+
 def main():
     analysis = json.loads(ANALYSIS_PATH.read_text())
     rms = np.array(analysis["spectrum"]["rms_energy"])
@@ -632,6 +684,37 @@ def main():
                               f"->drop {d['drop_time']:.1f}s"
                               for d in result["instrument_dropouts"])
              if result["instrument_dropouts"] else ""))
+
+    # --- vocal-led veto, applied to BOTH hole detectors -------------------
+    # Central rather than inside each detector: they find the same class of
+    # moment from the same broadband envelope, and neither can see which
+    # instrument came back. See veto_vocal_led().
+    _stem_env = {}
+    for _n in ("drums", "bass", "vocals"):
+        _f = STEMS_DIR / f"{_n}.wav"
+        if _f.exists():
+            _y, _s = librosa.load(str(_f), sr=SR, mono=True)
+            _e = librosa.feature.rms(y=_y, hop_length=512)[0]
+            _stem_env[_n] = (_e, librosa.frames_to_time(np.arange(len(_e)),
+                                                        sr=_s, hop_length=512))
+    _all_vetoed = []
+    for _key, _label in (("instrument_dropouts", "dropouts"),
+                         ("predrop_cutouts", "cutouts")):
+        _res = veto_vocal_led(result.get(_key, []), _stem_env, _label)
+        if isinstance(_res, tuple):
+            result[_key], _v = _res
+            _all_vetoed.extend(_v)
+    # A song whose moments are ALL vocal-led still needs some shape: put the
+    # single strongest one back rather than leaving it with nothing.
+    if _all_vetoed and not result.get("instrument_dropouts") \
+            and not result.get("predrop_cutouts"):
+        _best = max(_all_vetoed, key=lambda d: d.get("_rhythm_ratio", 0.0))
+        _best.pop("_rhythm_ratio", None)
+        _k = ("instrument_dropouts" if "dropout_start" in _best
+              else "predrop_cutouts")
+        result[_k] = [_best]
+        print(f"  all moments were vocal-led; kept the strongest "
+              f"({_best['drop_time']:.1f}s) so the song still has a shape")
 
     print("Detecting energy-step drops (no cutout required)...", flush=True)
     result["energy_drops"] = detect_energy_drops(rms, rms_times)

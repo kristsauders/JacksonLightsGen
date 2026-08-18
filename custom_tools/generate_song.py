@@ -647,10 +647,81 @@ def is_centred(key: str) -> bool:
             or any(n in key for n in CENTRED_STEMS))
 
 
+def _span_profile() -> dict:
+    """Per-shader measurement of what happens when it is stretched across the
+    whole house -- written by shader_span_test.py. Missing file = empty, and
+    the hand-maintained rules below carry on alone."""
+    f = SHOW_PATH / ".generation" / "shader_span.json"
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+SPAN_PROFILE = _span_profile()
+
+
+def spans_evenly(key: str) -> bool:
+    """True if this shader measurably fills the house rather than putting its
+    picture in one place.
+
+    is_centred() is a list of stems someone had to remember to add, so it only
+    ever knew about shaders we had already been burned by. It did not know
+    about Wisps -- a stock shader, not circular, but with a focal point all the
+    same -- which is what produced "a shader on all the matrices that seems to
+    have a center that's off the matrices... you just see the tendril looking
+    outer edges." Measured spanned across the real layout, 63% of props fall
+    below a fifth of the brightest prop, against a ~39% floor for an even
+    texture (many props are small or at the edge of the frame regardless).
+
+    The measurement is authoritative where it exists; the hand list stays as a
+    backstop for shaders that have not been measured yet.
+    """
+    stem = key[len("shader_"):] if key.startswith("shader_") else key
+    for name, prof in SPAN_PROFILE.items():
+        if re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") == stem:
+            return bool(prof.get("span_ok"))
+    return not is_centred(key)
+
+
+# The house bed is now gated on the MEASUREMENT rather than on provenance.
+#
+# The old rule was "nothing custom goes in the house bed", written after Slow
+# Dawn regressed 12 to 12's red fraction. That reasoning no longer holds: at
+# the time every custom shader emitted greyscale and xLights was assumed to
+# recolour it, whereas the red actually came from STOCK shaders painting their
+# own colours across the whole facade. Custom shaders now take their colour
+# only from c1/c2/c3 -- i.e. only from the palette, which never leads with
+# saturated red -- so they are the SAFER half of the library for this, not the
+# riskier one. Keeping them out left a pool of three, which is its own problem:
+# the whole-house layer is the most visible thing in the show to repeat.
+#
+# Red is re-checked by verify_render.py on every build; if this reopens that
+# regression the number will say so immediately.
+# How bright a shader may be and still sit under the whole show. Calibrated
+# against the pool the bed used BEFORE this round -- InnerDimensionalMatrix
+# 0.053, Black Cherry Cosmos 0.101, Space Spinning 0.045 -- which is what
+# produced the lit fractions Krists has been happy with. Opening the bed to
+# every evenly-spanning shader pulled in some very bright ones (Paper Layers
+# 0.543, Velvet Nap 0.503) and cost 5 points of lit fraction across all three
+# test songs, and hurt the run-up dip as well: the dip is a RATIO against the
+# surrounding light, so a bright constant base leaves less to take away.
+# 0.20 keeps the bed roughly as dim as it has always been while going from a
+# pool of 3 to 11.
+MAX_BED_LEVEL = 0.20
+
+
+def bed_level(key: str) -> float:
+    stem = key[len("shader_"):] if key.startswith("shader_") else key
+    for name, prof in SPAN_PROFILE.items():
+        if re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") == stem:
+            return float(prof.get("level", 0.0))
+    return 0.0
+
+
 HOUSE_BED_SHADERS = [k for k in SHADER_KEYS
-                     if (not any(n in k for n in NEW_SHADER_STEMS)
-                         or any(n in k for n in HOUSE_BED_SAFE_CUSTOM))
-                     and not is_centred(k)]
+                     if not is_centred(k) and spans_evenly(k)
+                     and bed_level(k) <= MAX_BED_LEVEL]
 
 # SHADERS THAT OBEY THE ASSIGNED PALETTE.
 #
@@ -833,6 +904,26 @@ PALETTES: dict[str, ColorPalette] = {
 # Rule kept from the red-flash rounds: never lead a family with saturated red.
 # A lead colour paints the biggest canvases, and pure red at scale was the
 # single worst-looking failure this project has had.
+# GREYSCALE AS A COLOUR. "The grayscale was actually also very cool, could we
+# keep both? Just use grayscale as another color variation? Maybe use it
+# especially for lower energy parts or something but not always so it's not
+# repetitive."
+#
+# Nothing in the shaders needs to change for this. They read c1/c2/c3 straight
+# from the palette, so a palette of neutrals reproduces exactly the greyscale
+# look the whole library had before the colour conversion -- it becomes one
+# palette choice among the others rather than a property of the shader.
+# Three of them, so a mono section still has a character of its own: cold,
+# warm, and a dim near-black.
+MONO_PALETTES: dict[str, ColorPalette] = {
+    "ash":    ColorPalette(colors=["#FFFFFF", "#9AA6B2", "#3C4650"],
+                           active_colors=[1, 2, 3]),
+    "bone":   ColorPalette(colors=["#FFF6E8", "#C9BBA6", "#4A423A"],
+                           active_colors=[1, 2, 3]),
+    "pewter": ColorPalette(colors=["#D8E2EA", "#6E7A88", "#20262C"],
+                           active_colors=[1, 2, 3]),
+}
+
 MOOD_PALETTES: dict[str, ColorPalette] = {
     # deep psychedelic -- violet/teal, no warm anchor
     "abyss":    ColorPalette(colors=["#6A00FF", "#00E5C0", "#FF00A8"], active_colors=[1, 2, 3]),
@@ -860,6 +951,7 @@ MOOD_PALETTES: dict[str, ColorPalette] = {
     "grove":    ColorPalette(colors=["#33D17A", "#0F8B8D", "#DFFFE0"], active_colors=[1, 2, 3]),
 }
 PALETTES.update(MOOD_PALETTES)
+PALETTES.update(MONO_PALETTES)
 
 # One family per song, chosen for that track's mood, plus two neighbours to
 # rotate through so a long song still evolves without leaving its identity.
@@ -2691,6 +2783,58 @@ def main():
           f"{len(harmony.get('chords') or [])} chord segments, "
           f"{len(chord_changes)} change points")
 
+    # The shared bar grid every large canvas lands on. Collected as spans are
+    # placed, then used by the cohort-lock pass to pull any straggler onto the
+    # same boundaries -- see the sync pass near the run-up dip.
+    cohort_marks: set[int] = set()
+
+    def hold_spans(target, layer, key, section, palette, seat, energy_level):
+        """Place a multi-bar HOLD as bar-aligned spans carrying a beat pulse.
+
+        Every large canvas has to come through here, whatever ROLE it happened
+        to draw that section. It previously did not, and that was the whole of
+        "the matrices seem oddly aligned... sometimes some of them are pulsing
+        and others aren't":
+
+          * ROLE_FEATURE subdivided the section on change_marks() and gave
+            every span a beat-locked brightness curve
+          * ROLE_TEXTURE and ROLE_OUTLINE placed ONE flat span across the
+            whole section with no curve at all
+
+        Two matrices sitting side by side, running the SAME shader, would
+        start and stop at different times and only one of them would breathe.
+        Measured on Gooey's intro: Smoke Drift ran 7600-13500 on Fence Matrix
+        1 with a pulse and 7225-13500 on Garage Roof without one. Role is an
+        internal staging concept; nothing about it should be visible as two
+        neighbouring canvases disagreeing.
+
+        Returns the number of spans that actually got a pulse curve.
+        """
+        bars_per_change = 4 if target.get("large") else 2
+        marks = change_marks(section, bars_per_change)
+        if len(marks) < 2:
+            return 0
+        n = 0
+        for j in range(len(marks) - 1):
+            s_ms = int(marks[j] * 1000)
+            e_ms = int(marks[j + 1] * 1000)
+            if key in SHADER_SWAY:
+                k = SHADER_SWAY[key][j % 2]
+            else:
+                k = key if j % 2 == 0 else REVERSE.get(key, key)
+            depth = 0.5 + 0.5 * min(1.0, energy_level / 0.7)
+            if not k.startswith("shader_"):
+                depth *= 0.6
+            base_pal = palette
+            if target.get("large") and is_palette_driven(k):
+                base_pal = palette_variant(palette, seat)
+            pal_k = beat_pulse_palette(base_pal, beats, s_ms, e_ms, depth)
+            if pal_k is not base_pal:
+                n += 1
+            cohort_marks.update((s_ms, e_ms))
+            add_target(target, layer, k, s_ms, e_ms, pal_k)
+        return n
+
     def change_marks(section, bars_per_change: int) -> list[float]:
         """Bar boundaries at which a big canvas should change its pattern,
         preferring downbeats that coincide with a real chord change.
@@ -3147,6 +3291,12 @@ def main():
     n_cast = len(cast)
     role_counts = Counter()
     prev_pal_name = None
+    # Per-song median section energy -- the reference point for "a lower
+    # energy part". Absolute thresholds were tried for density earlier in this
+    # project and did not transfer between songs, because each track sits at
+    # its own overall level.
+    _energies = sorted(sec.energy_level for sec in analysis.sections)
+    median_energy = (_energies[len(_energies) // 2] if _energies else 0.0)
 
     n_shader_pulse = 0
     for si, section in enumerate(analysis.sections):
@@ -3346,19 +3496,34 @@ def main():
             # The song's real climax overrides the rotation entirely with a
             # dedicated high-contrast palette -- direct feedback: "identify
             # the big climaxes... where we can introduce more contrast."
-            pal_name = "climax"
+            pal_name = cycle_name = "climax"
         else:
             pal_idx = (si + escalation) % len(song_palette_cycle)
             if song_palette_cycle[pal_idx] == prev_pal_name:
                 pal_idx = (pal_idx + 1) % len(song_palette_cycle)
-            pal_name = song_palette_cycle[pal_idx]
+            pal_name = cycle_name = song_palette_cycle[pal_idx]
+            # A quiet section may go MONO instead -- greyscale kept as one of
+            # the colour choices rather than lost to the colour conversion.
+            # Gated three ways so it stays an event: only below the song's own
+            # median energy (a quiet section, measured per song rather than by
+            # an absolute threshold that would mean different things on a
+            # ballad and on a house track), only a third of the time, and
+            # never twice in a row.
+            if (e <= median_energy and prev_pal_name not in MONO_PALETTES
+                    and random.Random(f"{SONG_NAME}|mono|{si}").random() < 0.34):
+                pal_name = sorted(MONO_PALETTES)[si % len(MONO_PALETTES)]
         prev_pal_name = pal_name
         palette = PALETTES[pal_name]
         section_meta[si]["palette"] = palette
         if pal_name == "climax":
             accent_pal = PALETTES["gold"]
         else:
-            accent_idx = (song_palette_cycle.index(pal_name) + 1) % len(song_palette_cycle)
+            # Accent follows the ROTATION, not the section's actual palette:
+            # a mono section is not in the song's colour cycle, so looking it
+            # up there is a ValueError. Its accent stays the colour the
+            # section would otherwise have had, which keeps the mono passage
+            # tied to the songs's palette family instead of floating free.
+            accent_idx = (song_palette_cycle.index(cycle_name) + 1) % len(song_palette_cycle)
             accent_pal = PALETTES[song_palette_cycle[accent_idx]]
         # One shader/pattern choice for every large canvas active THIS
         # section, instead of each rolling its own -- direct feedback:
@@ -3582,57 +3747,16 @@ def main():
                     # Prefer bar boundaries where the HARMONY moves -- see
                     # change_marks(). Falls back to the fixed cadence on songs
                     # without enough chord movement to drive it.
+                    #
+                    # The span placement itself lives in hold_spans(), shared
+                    # with the TEXTURE/OUTLINE branches so that every large
+                    # canvas lands on the same boundaries and carries the same
+                    # beat pulse no matter which role it drew this section.
                     marks = change_marks(section, bars_per_change)
                     if len(marks) >= 2:
-                        for j in range(len(marks) - 1):
-                            s_ms = int(marks[j] * 1000)
-                            e_ms = int(marks[j + 1] * 1000)
-                            if key in SHADER_SWAY:
-                                # Shaders can't be "reversed" by REVERSE (it
-                                # only knows chase/wave keys) -- swing their
-                                # own internal motion instead, by alternating
-                                # the A/B variants built in
-                                # register_shader_sway(). This is what makes a
-                                # shader feel like it's moving WITH the song
-                                # rather than just running underneath it.
-                                k = SHADER_SWAY[key][j % 2]
-                            else:
-                                k = key if j % 2 == 0 else REVERSE.get(key, key)
-                            # Beat-locked brightness on every effect placed
-                            # here. Everything on this branch is a multi-bar
-                            # HOLD by construction (marks are bar boundaries
-                            # 2-4 bars apart), so between boundaries it is a
-                            # continuous wash with nothing happening on the
-                            # beat -- the literal shape of "not tied to the
-                            # beat enough". Measured on Gooey: a Shader with
-                            # this curve accents the beat by a 1.44x brightness
-                            # ratio, while a Plasma without it sat at 0.98,
-                            # i.e. no beat relationship whatsoever. Plasma is
-                            # a wash with the same defect, so the rule is the
-                            # placement, not the effect name.
-                            #
-                            # Depth follows the section's energy so the pulse
-                            # grows with the song rather than being one fixed
-                            # intensity, and non-shader effects get 60% of it
-                            # because they already carry their own visible
-                            # motion and don't need as much help.
-                            depth = 0.5 + 0.5 * min(1.0, section.energy_level / 0.7)
-                            if not k.startswith("shader_"):
-                                depth *= 0.6
-                            # Each hero canvas leads with a DIFFERENT colour
-                            # from the SAME family, so several canvases running
-                            # palette-driven shaders read as related rather
-                            # than cloned -- the middle option Krists asked
-                            # for: "the same shader could be used but with
-                            # slightly different colors." See palette_variant.
-                            base_pal = palette
-                            if target.get("large") and is_palette_driven(k):
-                                base_pal = palette_variant(palette, large_seat)
-                            pal_k = beat_pulse_palette(base_pal, beats,
-                                                       s_ms, e_ms, depth)
-                            if pal_k is not base_pal:
-                                n_shader_pulse += 1
-                            add_target(target, L_MOTION, k, s_ms, e_ms, pal_k)
+                        n_shader_pulse += hold_spans(target, L_MOTION, key,
+                                                     section, palette,
+                                                     large_seat, e)
                     else:
                         add_target(target, L_MOTION, key, sec_start, sec_end, palette)
 
@@ -3876,7 +4000,15 @@ def main():
                     pal_b = palette
                     if target.get("large") and is_palette_driven(key):
                         pal_b = palette_variant(palette, large_seat)
-                    add_target(target, L_BASE, key, sec_start, sec_end, pal_b)
+                    # Large canvases take the shared bar grid + beat pulse
+                    # here too, so a matrix in TEXTURE role stays locked to
+                    # its neighbours in FEATURE role. See hold_spans().
+                    if target.get("large"):
+                        n_shader_pulse += hold_spans(target, L_BASE, key,
+                                                     section, palette,
+                                                     large_seat, e)
+                    else:
+                        add_target(target, L_BASE, key, sec_start, sec_end, pal_b)
                 elif target["name"] not in anchor_names_here:
                     key = "shimmer" if escalation >= 2 and e > 0.6 else "twinkle_soft"
                     add_target(target, L_BASE, key, sec_start, sec_end, palette)
@@ -3896,7 +4028,12 @@ def main():
                     pal_b = palette
                     if target.get("large") and is_palette_driven(key):
                         pal_b = palette_variant(palette, large_seat)
-                    add_target(target, L_BASE, key, sec_start, sec_end, pal_b)
+                    if target.get("large"):
+                        n_shader_pulse += hold_spans(target, L_BASE, key,
+                                                     section, palette,
+                                                     large_seat, e)
+                    else:
+                        add_target(target, L_BASE, key, sec_start, sec_end, pal_b)
                 elif target["name"] not in anchor_names_here:
                     # A full-section Color Wash on the beat anchor would hold it
                     # lit through every kick flash -- the anchor must stay dark
@@ -5227,6 +5364,79 @@ def main():
 
     effects = clip_for_blackout(effects, blackout_windows)
 
+    # The big canvases, as one group. Used by BOTH the cohort lock below and
+    # the run-up dip further down, so it has to be defined ahead of the first
+    # of them -- it originally lived inside the dip block, and moving the lock
+    # above the dip left it referencing a name that did not exist yet.
+    cohort_names = set()
+    for _t in cast:
+        if _t.get("large"):
+            cohort_names.add(_t["name"])
+            cohort_names.update(_t.get("members") or [])
+
+    # --- cohort lock: pull straggler big canvases onto the shared grid -----
+    # "There are other parts of Gooey also where the matrices either start or
+    # end at slightly different times from each other... let's get them more
+    # together."
+    #
+    # hold_spans() puts every large canvas on the same bar marks and the dip
+    # now moves them as a group, which removes the two causes found by
+    # measurement. This is the backstop for any third: a cohort hold that is
+    # within ~a beat of a shared boundary is snapped onto it. Misalignments
+    # that small are never intentional -- they are rounding, clipping or an
+    # overlap nudge -- and at 40fps a 375ms stagger between two matrices
+    # running the same shader is clearly visible as "oddly aligned".
+    #
+    # ORDER MATTERS: this runs BEFORE the run-up dip, not after. Run
+    # afterwards it snapped dip-truncated ends back out to the full bar
+    # boundary and silently undid the breath -- measured, ENIGMA's dip
+    # median sat at 0.82-0.88 against 0.61 before the cohort work, and
+    # raising the dip probability from 0.66 to 0.9 moved Gooey and Fara not
+    # at all (0.817 and 0.900 both times), which is what gave it away. The
+    # dip truncates every cohort member to the SAME window start, so running
+    # it second keeps them aligned anyway.
+    #
+    # Guarded against undoing a blackout: clip_for_blackout() ran earlier, so
+    # snapping an end LATER could push an effect back into darkness that was
+    # deliberately cleared. Any snap that would newly overlap a blackout
+    # window is dropped.
+    if cohort_marks:
+        import bisect
+        grid = sorted(cohort_marks)
+
+        def _snap(v: int) -> int:
+            i = bisect.bisect_left(grid, v)
+            best = None
+            for j in (i - 1, i, i + 1):
+                if 0 <= j < len(grid) and (best is None
+                                           or abs(grid[j] - v) < abs(best - v)):
+                    best = grid[j]
+            return best if best is not None and abs(best - v) <= 900 else v
+
+        def _in_blackout(a: int, b: int) -> bool:
+            return any(a < int(wb * 1000) and b > int(wa * 1000)
+                       for wa, wb in blackout_windows)
+
+        n_snapped = 0
+        for eff in effects:
+            if eff.layer not in (L_BASE, L_MOTION):
+                continue
+            if eff.end_time_ms - eff.start_time_ms < 1200:
+                continue
+            nm = eff.model_name
+            if not (nm in cohort_names or nm.split("/")[0] in cohort_names):
+                continue
+            a, b = _snap(eff.start_time_ms), _snap(eff.end_time_ms)
+            if b - a < 600 or (a, b) == (eff.start_time_ms, eff.end_time_ms):
+                continue
+            if _in_blackout(a, b) and not _in_blackout(eff.start_time_ms,
+                                                       eff.end_time_ms):
+                continue
+            eff.start_time_ms, eff.end_time_ms = a, b
+            n_snapped += 1
+        print(f"Cohort lock: {n_snapped} big-canvas holds pulled onto the "
+              f"shared grid ({len(grid)} boundaries)")
+
     # --- run-up dip: thin the last beat of each section ---------------------
     # "The dynamic detection that would get a bit dimmer before a new phrase
     # or drop or fill isn't working, it's too static and always lit up."
@@ -5246,14 +5456,36 @@ def main():
             continue
         dip_windows.append((section.end_time - beat_ms / 1000.0,
                             section.end_time))
+    # The dip is deliberately PARTIAL for ordinary props -- a full cut reads
+    # as a mistake rather than as a breath. But rolling that dice per EFFECT
+    # meant the big canvases disagreed with each other: at any given section
+    # approach some matrices truncated into the dip and their neighbours ran
+    # straight through, which is precisely "they turn off at odd times and not
+    # all at the same time with each other." The cohort decides ONCE per
+    # window and moves together; everything else keeps its own dice.
+    # Near-always for the cohort, where the per-effect rate is 0.66. The two
+    # numbers do different jobs: 0.66 PER EFFECT produces a partial thinning
+    # within one prop's own stream, which is what keeps a dip from reading as
+    # a mistake. Once the big canvases move as one, that same 0.66 becomes a
+    # coin flip on whether the breath happens AT ALL, and the canvases carry
+    # most of the lit area -- measured, the dip median went 0.61 -> 0.88 on
+    # ENIGMA, i.e. the breath before a section change all but disappeared.
+    # Synchronised means it should happen nearly every time and be felt.
+    cohort_dip = [random.Random(f"{SONG_NAME}|cohort-dip|{i}").random() < 0.9
+                  for i in range(len(dip_windows))]
     if dip_windows:
         kept = []
         for eff in effects:
             if eff.layer in (L_BASE, L_MOTION):
                 s_s, e_s = eff.start_time_ms / 1000.0, eff.end_time_ms / 1000.0
-                hit = next(((a, b) for a, b in dip_windows
-                            if s_s < b and e_s > a), None)
-                if hit and dip_rng.random() < 0.66:
+                hit_i = next((i for i, (a, b) in enumerate(dip_windows)
+                              if s_s < b and e_s > a), None)
+                hit = dip_windows[hit_i] if hit_i is not None else None
+                in_cohort = (eff.model_name in cohort_names
+                             or eff.model_name.split("/")[0] in cohort_names)
+                take = (cohort_dip[hit_i] if (hit is not None and in_cohort)
+                        else dip_rng.random() < 0.66)
+                if hit and take:
                     a, _b = hit
                     if s_s < a - 0.05:
                         # truncate into the dip, on the frame grid
