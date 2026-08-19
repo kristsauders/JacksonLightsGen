@@ -96,10 +96,10 @@ def main() -> None:
     # Props big enough for "how much of the picture landed here" to mean
     # something; a 3-node prop is noise either way.
     props = {n: (v["first"], v["last"] + 1) for n, v in cm.items()
-             if v["count"] >= 150}
+             if v["count"] >= 90}
 
     verdict = {}
-    print(f"\n{'shader':24} {'spread':>7} {'dark%':>6} {'level':>6}  verdict   ({len(props)} props)")
+    print(f"\n{'shader':24} {'spread':>7} {'dark%':>6} {'level':>6} {'flick':>6}  verdict   ({len(props)} props)")
     for i, fs in enumerate(used):
         means = []
         for off in (1500, 3000, 4500):
@@ -120,11 +120,32 @@ def main() -> None:
         # against the surrounding light and a constant bright base leaves less
         # to take away.
         level = float(m.mean() / 255.0)
+        # FLICKER ON SMALL PROPS. A shader can be perfectly calm on a big
+        # matrix and strobe a snowflake: the matrix averages thousands of
+        # nodes, while a 90-node prop samples a tiny patch, so a fine moving
+        # texture swings that prop's whole brightness. Measured, Wind Wheat's
+        # stalks flicker small props at 10 Hz while reading as gentle on
+        # Garage Roof -- and the house bed lands on EVERY prop, so this is the
+        # bed's problem specifically. shader_smoke_test.py cannot see it; it
+        # measures one large canvas by design.
+        small = [i for i, n in enumerate(props) if cm[n]["count"] <= 400]
+        flick = 0.0
+        if small:
+            seq = []
+            for k in range(24):
+                idx = min(int((i * SLOT_MS + 2000 + k * f.step_time_ms)
+                              / f.step_time_ms), len(f) - 1)
+                fr = np.frombuffer(f.frame(idx), dtype=np.uint8).astype(np.float32)
+                seq.append([fr[a:b].mean() for a, b in
+                            [list(props.values())[j] for j in small]])
+            arr = np.array(seq) / 255.0
+            flick = float(np.abs(np.diff(arr, axis=0)).max())
         ok = dark <= MAX_DARK
         verdict[fs.stem] = {"spread": round(spread, 3),
                             "dark_frac": round(dark, 3),
-                            "level": round(level, 4), "span_ok": ok}
-        print(f"{fs.stem[:24]:24} {spread:7.2f} {dark*100:5.0f}% {level:6.3f}  "
+                            "level": round(level, 4),
+                            "small_flicker": round(flick, 4), "span_ok": ok}
+        print(f"{fs.stem[:24]:24} {spread:7.2f} {dark*100:5.0f}% {level:6.3f} {flick:6.3f}  "
               + ("even enough to span" if ok else "CONCENTRATED -- don't span"))
 
     CACHE.parent.mkdir(parents=True, exist_ok=True)

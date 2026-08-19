@@ -531,6 +531,56 @@ SHADER_PICKS = [
 ]
 
 
+def fade_palette(palette: ColorPalette) -> ColorPalette:
+    """Copy of `palette` with a HIT-then-SLOW-FADE brightness curve.
+
+    "There is a single kick drum for each drop and everything between that and
+    the next single kick drum is the slow fade."
+
+    A cycle hold at constant brightness puts the right pattern in the right
+    place and still reads wrong, because nothing decays: measured on Gooey,
+    the kicks at 15.8/26.9/37.9/49.0 lifted the display only 1.0-1.6x, since
+    the previous cycle was still sitting at full level when the next one
+    landed. The shape has to be in the effect itself.
+
+    Fast off the hit, then a long tail -- the same asymmetry a real drum decay
+    has, and the reason it reads as one gesture rather than a triangle wave.
+    """
+    pts = [(0.00, 0.46), (0.04, 0.34), (0.12, 0.24),
+           (0.30, 0.16), (0.60, 0.10), (1.00, 0.06)]
+    vc = ("C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+          "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values="
+          + ";".join(f"{t:.2f}:{v:.2f}" for t, v in pts))
+    return palette.model_copy(update={
+        "extra_parts": [x for x in (palette.extra_parts or [])
+                        if not x.startswith("C_VALUECURVE_Brightness=")] + [vc]})
+
+
+def percussive_ratio() -> float:
+    """How much of this song's level is drums, 0-1. Cached per song.
+
+    Used to tell a driving track from a mellow one -- see the pulse-mode gate.
+    Measured across the library: 0.441 (So Easy) to 0.773 (Aperture).
+    """
+    cache = SHOW_PATH / ".generation" / SONG_NAME / "percussive.json"
+    try:
+        return float(json.loads(cache.read_text())["drums_over_mix"])
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        import librosa
+        y, _ = librosa.load(str(SHOW_PATH / f"{SONG_NAME}.mp3"), sr=22050, mono=True)
+        d, _ = librosa.load(str(SHOW_PATH / "stems" / SONG_NAME / "drums.wav"),
+                            sr=22050, mono=True)
+        import numpy as _np
+        r = float(_np.sqrt((d ** 2).mean()) / max(_np.sqrt((y ** 2).mean()), 1e-9))
+    except Exception:
+        return 1.0          # unknown -> don't let this gate block anything
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"drums_over_mix": round(r, 4)}))
+    return r
+
+
 def register_shaders() -> list[str]:
     """Add one EFFECTS entry per usable shader, with settings derived from
     that shader's own ISF header. Returns the list of registered effect keys
@@ -1815,8 +1865,27 @@ def build_cast(show_config, positions: dict[str, dict]):
         # treatment entirely. He has said he will keep adding props, so this
         # has to work without code edits: a flat panel with several strings, or
         # a big node count, IS a large canvas.
+        # Node/string counts are keyed by MODEL name, so a GROUP never found
+        # itself here and every group fell through as not-large -- which is
+        # why "Front Window Matrices" (three 640-node panels, 1920 nodes
+        # between them) was classed small, took the no-motion branch, and drew
+        # flat washes while every individual matrix around it ran patterns:
+        # "the upper three window matrices often show solid colors or they're
+        # mostly blank with just the outlines doing things, when the other
+        # matrices all have effects on them."
+        # A GROUP of matrices is a big canvas -- measuring it by node count
+        # does not work here (model_nodes reports 1 for these models, so the
+        # arithmetic version of this test silently classed a 3-panel window
+        # group as small). Membership is the reliable signal: three matrix
+        # panels side by side are collectively a drawing surface, and treating
+        # them as small is what left them on flat washes while every
+        # individual matrix around them ran patterns.
+        _members = t.get("members") or [t["name"]]
+        _grp_of_matrices = (t["kind"] == "group" and t["cat"] == "matrix"
+                            and len(_members) >= 2)
         t["large"] = (
             t["name"] in LARGE_CANVAS
+            or _grp_of_matrices
             or (t["cat"] == "matrix"
                 and (model_strings.get(t["name"], 1) >= 3
                      or model_nodes.get(t["name"], 0) >= 400))
@@ -2039,9 +2108,19 @@ SAFE_LARGE = ["spirals", "plasma_organic",
 # was explicit, and spiral/wave/chase's clear one-bar directional sweep is
 # part of what reads as rhythmic that a shader's own ambient motion doesn't
 # replace on its own.
+# Chases are OUT of the flat-canvas pool. On a 2D matrix a SingleStrand chase
+# renders as broad vertical bars sliding side to side, and measured across
+# five songs it was the single most-used thing on the big matrices by a wide
+# margin -- 445 placements totalling 1300 seconds, more than double the next
+# entry. "We're overusing the effect where the large vertical lines slowly
+# move across the matrix side to side, it looks nice for using occasionally
+# ... but we're just using it too much."
+#
+# They stay available for cones and curtains, where the same effect wraps or
+# draws rather than striping, and they still reach flat canvases through the
+# other passes -- this only stops the FEATURE roll from picking one.
 SAFE_LARGE_WEIGHTED = [*SHADER_KEYS, *SHADER_KEYS,
-                       "spirals", "plasma_organic",
-                       "chase_mid_out", "chase_lr", "chase_rl"]
+                       "spirals", "plasma_organic"]
 
 
 def prominence_of(t: dict) -> int:
@@ -2188,6 +2267,27 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
     if cat == "tree":
         return rng.choice(["chase_mid_out", "meteors_down", "spirals"])
     # scattered decorative props -> step prop to prop
+    # SUBMODELS TRACE THE PROP'S SHAPE. "For the submodels on the flakes and
+    # spinners and rosa grande and grand illusion and those kinds of props, I
+    # like what we're doing and want to add some more effects for variety, for
+    # example doing single strand chases and fans and radials and stuff like
+    # that on the submodels instead of the whole model can look cool because
+    # it traces a certain shape."
+    #
+    # A submodel is usually a named part with real geometry -- a ring, a
+    # spoke set, an arm, a petal row. Running a chase or a radial burst along
+    # THAT rather than across the whole prop is what draws the shape out. The
+    # pool is deliberately shape-flavoured: linear chases (including the
+    # centre-out pair, which reads as a fan opening on a spoke or arm set),
+    # and radial bursts that expand from the middle of a ring.
+    if "/" in target["name"]:
+        return rng.choice([
+            "chase_mid_out", "chase_mid_in",      # fans open / close
+            "chase_lr", "chase_rl",               # traces along the part
+            "chase_pair_lr", "chase_pair_rl",     # two dots meeting
+            "shockwave", "ripple_explode",        # radial from the centre
+            "pinwheel",                           # rotates about the middle
+        ])
     if n >= 4:
         return rng.choice(["sweep_right", "sweep_left"] if wide else ["sweep_up", "sweep_down"])
     return rng.choice(["chase_lr", "chase_rl", "shockwave"])
@@ -2787,6 +2887,8 @@ def main():
     # placed, then used by the cohort-lock pass to pull any straggler onto the
     # same boundaries -- see the sync pass near the run-up dip.
     cohort_marks: set[int] = set()
+    # (canvas, cycle-start) pairs already given their one span -- see hold_spans.
+    _cycle_claimed: set[tuple] = set()
 
     def hold_spans(target, layer, key, section, palette, seat, energy_level):
         """Place a multi-bar HOLD as bar-aligned spans carrying a beat pulse.
@@ -2810,6 +2912,28 @@ def main():
 
         Returns the number of spans that actually got a pulse curve.
         """
+        # In a drop/fade passage the CYCLE is the unit, not the section: one
+        # shader from the kick that starts the drop until the kick that starts
+        # the next one. The section containing a cycle's start owns it; every
+        # other section overlapping that cycle places nothing, so the canvas
+        # holds one pattern across the whole fade instead of switching partway
+        # through it.
+        cyc = next((c for c in drop_cycles
+                    if c[0] < section.end_time and c[1] > section.start_time), None)
+        if cyc is not None and target.get("large"):
+            # Claimed by the FIRST section that reaches this cycle with this
+            # canvas active -- not by the section containing the cycle's
+            # start. Whether a canvas is active is decided per section, so
+            # tying ownership to the start section meant that if that section
+            # happened not to light this canvas, the entire 11-second cycle
+            # got nothing and the span vanished instead of moving.
+            # The dedicated drop-cycle pass owns these canvases here; the
+            # per-section path must not also place on them. Claiming the cycle
+            # opportunistically from whichever section happened to be active
+            # was tried and covered only one of Gooey's five cycles, because
+            # in a quiet intro the big canvases are rarely in the active set.
+            return 0
+
         bars_per_change = 4 if target.get("large") else 2
         marks = change_marks(section, bars_per_change)
         if len(marks) < 2:
@@ -2828,6 +2952,28 @@ def main():
             base_pal = palette
             if target.get("large") and is_palette_driven(k):
                 base_pal = palette_variant(palette, seat)
+            # PULSE ONE LAYER, NOT THE WHOLE MATRIX. "I notice sometimes we're
+            # layering multiple shaders or effects on top of each other on the
+            # matrices which looks great, maybe we could pulse just one of the
+            # shaders and not have to pulse the whole matrix? ... for pulsing
+            # the matrices, I think we're doing it a little too much."
+            #
+            # The feature layer takes the pulse; the base texture underneath
+            # runs steady, so a canvas carrying both reads as one element
+            # breathing against a stable ground rather than the whole prop
+            # breathing as a block -- and it cuts how much pulsing there is
+            # overall, which was the other half of the note.
+            #
+            # Even on the feature layer, not every span: a deterministic 30%
+            # are held flat so a canvas alternates between breathing and
+            # running steady instead of pulsing continuously.
+            _skip = (layer != L_MOTION
+                     or random.Random(f"{SONG_NAME}|pulseskip|"
+                                      f"{target['name']}|{s_ms}").random() < 0.30)
+            if _skip:
+                cohort_marks.update((s_ms, e_ms))
+                add_target(target, layer, k, s_ms, e_ms, base_pal)
+                continue
             pal_k = beat_pulse_palette(base_pal, beats, s_ms, e_ms, depth)
             if pal_k is not base_pal:
                 n += 1
@@ -2857,7 +3003,35 @@ def main():
         # fixed cadence they're replacing.
         floor_n = max(2, len(sec_db) // (bars_per_change * 2))
         ceil_n = max(2, len(sec_db) // max(1, bars_per_change // 2))
-        if floor_n <= len(harmonic) <= ceil_n:
+        # ONE SHADER PER DROP, where the song is built out of drops.
+        #
+        # "In the Gooey intro we're still changing shaders too much and
+        # starting/stopping them at odd times. It seems like on every
+        # drop/fade cycle we use two shaders and the timing of them switching
+        # seems random. Let's use just one shader for each loud drop until it
+        # fades out all the way and switch shaders on the next drop."
+        #
+        # A bar cadence cannot express that: the drops are ~11s apart on
+        # Gooey's intro and a 4-bar mark lands every ~11s too, so the two
+        # grids beat against each other and a canvas changes shader somewhere
+        # in the middle of a fade. When a section contains real hit-then-fade
+        # events, THEY are the boundaries -- the shader is held for the whole
+        # cycle and changes on the next hit.
+        # Measured on Gooey: the hits land at 4.8, 26.9, 37.9, 49.0 and the
+        # section boundaries at 7.2, 26.0, 38.0, 49.8 -- i.e. the detector has
+        # ALREADY split the intro into one section per drop/fade cycle. So the
+        # extra shader change is the SUBDIVISION inside a section, not a
+        # misplaced boundary: two 4-bar marks inside an 11s cycle is exactly
+        # the "on every drop/fade cycle we use two shaders" report. When a
+        # section starts on a hit, it gets one shader for its whole length.
+        starts_on_hit = any(abs(h - section.start_time) <= 1.2 for h in big_hits)
+        hits_in = [h for h in big_hits
+                   if section.start_time + 1.2 < h < section.end_time - 1.2]
+        if starts_on_hit and not hits_in:
+            return [section.start_time, section.end_time]
+        if hits_in:
+            marks = [section.start_time] + hits_in
+        elif floor_n <= len(harmonic) <= ceil_n:
             marks = harmonic
         else:
             marks = sec_db[::bars_per_change]
@@ -3179,8 +3353,22 @@ def main():
     # Tree keeping the beat. beat_hit_key() gives every large canvas, matrix
     # and cone a pattern-shaped hit (Shockwave / spiral burst) instead of a
     # solid `On`, which is the thing he actually asked for.
+    # ...but NOT the upper window matrices. Krists has now said this twice
+    # from two directions: "the three upper windows aren't great for flashing
+    # because they're matrices", and then "the upper three window matrices
+    # often show solid colors or they're mostly blank with just the outlines
+    # doing things, when the other matrices all have effects on them."
+    # Those are the same fact. An anchor has its ambient fill suppressed so
+    # its flash has darkness to come out of -- which is precisely why they
+    # looked plain. Off the anchor list, they carry patterns like every other
+    # matrix, and their OUTLINES (separate targets) still mark the beat.
+    def _is_window_face(t: dict) -> bool:
+        n = t["name"].lower()
+        return "window matri" in n and "/" not in t["name"]
+
     anchor_cands = [t for t in cast
                     if not t.get("slow")
+                    and not _is_window_face(t)
                     and prominence_of(t) >= 2
                     and t["name"] not in movement_props]
     if not anchor_cands:                  # every candidate is already busy
@@ -3290,6 +3478,77 @@ def main():
 
     n_cast = len(cast)
     role_counts = Counter()
+    # --- DROP-AND-FADE CYCLES ---------------------------------------------
+    # "There is a single kick drum for each drop and everything between that
+    # and the next single kick drum is the slow fade... It all needs to be
+    # synced to the kick drum. I think there's a total of 4 or 5 drop and fade
+    # cycles like that in the entire first minute."
+    #
+    # Measured on Gooey: the kick fires at 4.82, 15.85, 26.90, 37.92, 48.97
+    # and 59.99 -- five cycles, 11.03s apart to within 20ms, with the last one
+    # the main drop where the full track starts. Against that, the section
+    # detector put THIRTY-TWO boundaries in the same 62 seconds. Driving big
+    # canvases off sections in this passage is what produced "the matrices
+    # come on sometimes on the kick but sometimes on other random times, turn
+    # off at random times, and switch to different patterns at random times."
+    #
+    # An isolated kick -- one with several seconds of silence before it -- IS
+    # the structure here, so it is the only grid worth using. Detected rather
+    # than hardcoded, so any song with this shape gets it.
+    def _drop_cycles() -> list[tuple[float, float]]:
+        kv = voices.get("kick")
+        if kv is None or len(kv) < 3:
+            return []
+        ons = sorted(kv.onsets)
+        iso = [t for i, t in enumerate(ons)
+               if (i == 0 or t - ons[i - 1] >= 6.0)]
+        gaps = [b - a for a, b in zip(iso, iso[1:]) if 5.0 <= b - a <= 20.0]
+        if len(gaps) < 2:
+            return []
+        period = sorted(gaps)[len(gaps) // 2]
+        # Walk the grid forward from the first isolated hit rather than
+        # chaining detected hits directly. The kick detector MISSES some of
+        # these: on Gooey it finds 4.78, 26.90, 37.87 and 49.02 but not the
+        # one at 15.85, leaving a 22-second hole that looks like two cycles
+        # fused into one. The figure is far more regular than the detector --
+        # measured period 11.03s, consistent to 20ms -- so predict the next
+        # start and SNAP it to a real kick when one is there, which keeps
+        # every boundary on an actual drum hit while surviving a missed one.
+        out: list[tuple[float, float]] = []
+        t = iso[0]
+        while True:
+            nxt = t + period
+            near = min(ons, key=lambda o: abs(o - nxt), default=None)
+            if near is not None and abs(near - nxt) <= 0.5:
+                nxt = near
+            if nxt > (ons[-1] if ons else 0) + period:
+                break
+            # The passage ends where the kick becomes continuous again -- that
+            # last isolated hit IS the main drop, and past it the song is no
+            # longer built of drop-and-fade cycles.
+            dense = sum(1 for o in ons if t < o < nxt) >= 4
+            if dense:
+                break
+            out.append((t, nxt))
+            t = nxt
+            if len(out) > 24:
+                break
+        return out
+
+    drop_cycles = _drop_cycles()
+    if drop_cycles:
+        print(f"Drop/fade cycles: {len(drop_cycles)} "
+              f"({', '.join(f'{a:.1f}' for a, _ in drop_cycles)}s"
+              f" -> {drop_cycles[-1][1]:.1f}s)")
+
+    # Drop/fade cycle times, needed by change_marks() below -- computed here
+    # rather than at the staging pass further down, which ran too late to
+    # influence which shader a canvas holds.
+    big_hits = detect_big_hits(
+        analysis,
+        kick_times=(voices["kick"].onsets if "kick" in voices else None),
+        downbeats=downbeats)
+
     prev_pal_name = None
     # Per-song median section energy -- the reference point for "a lower
     # energy part". Absolute thresholds were tried for density earlier in this
@@ -3297,6 +3556,22 @@ def main():
     # its own overall level.
     _energies = sorted(sec.energy_level for sec in analysis.sections)
     median_energy = (_energies[len(_energies) // 2] if _energies else 0.0)
+    # The QUIETEST sections go greyscale -- about one in five, at least one in
+    # every song, never two in a row, and never the climax. Picking them up
+    # front guarantees the look actually appears and puts it where Krists
+    # asked for it ("maybe use it especially for lower energy parts").
+    mono_sections: set[int] = set()
+    _quiet = sorted(range(len(analysis.sections)),
+                    key=lambda i: analysis.sections[i].energy_level)
+    _want = max(1, round(len(analysis.sections) * 0.20))
+    for _i in _quiet:
+        if len(mono_sections) >= _want:
+            break
+        if _i in climax_sections:
+            continue
+        if (_i - 1) in mono_sections or (_i + 1) in mono_sections:
+            continue
+        mono_sections.add(_i)
 
     n_shader_pulse = 0
     for si, section in enumerate(analysis.sections):
@@ -3428,6 +3703,19 @@ def main():
             n_active_target = int(round(n_active_target * headroom))
             section_meta[si]["instr_playing"] = playing
 
+        # DURING A DROP/FADE CYCLE, THE DISPLAY THINS OUT. "Everything between
+        # that and the next single kick drum is the slow fade" -- everything,
+        # not just the canvases carrying the shader. Measured with the cycle
+        # holds and their decay envelope in place but the rest of the show
+        # running normally, the kicks at 15.8/26.9/37.9 still lifted the
+        # display only 1.2-1.5x, because ~450 other targets held the floor up
+        # at 40-60 while the fade decayed underneath them. The two kicks that
+        # DID read (6.2x and 6.5x) are the ones with genuinely quiet approaches.
+        #
+        # So the cast is cut back hard inside a cycle: the hit lands on a
+        # near-empty display and the fade has somewhere to fall to.
+        if any(c[0] <= section.start_time < c[1] for c in drop_cycles):
+            n_active_target = max(3, int(round(n_active_target * 0.20)))
         n_active = min(n_cast, max(2, n_active_target))
 
         # Rotate which targets are active so different props lead over time.
@@ -3504,13 +3792,11 @@ def main():
             pal_name = cycle_name = song_palette_cycle[pal_idx]
             # A quiet section may go MONO instead -- greyscale kept as one of
             # the colour choices rather than lost to the colour conversion.
-            # Gated three ways so it stays an event: only below the song's own
-            # median energy (a quiet section, measured per song rather than by
-            # an absolute threshold that would mean different things on a
-            # ballad and on a house track), only a third of the time, and
-            # never twice in a row.
-            if (e <= median_energy and prev_pal_name not in MONO_PALETTES
-                    and random.Random(f"{SONG_NAME}|mono|{si}").random() < 0.34):
+            # CHOSEN, not rolled: a per-section coin flip gave Fara zero mono
+            # sections and most songs one or two, which is why Krists saw it
+            # "in one part in Gooey and I think that's about it." A song that
+            # never shows a variation does not have that variation.
+            if si in mono_sections:
                 pal_name = sorted(MONO_PALETTES)[si % len(MONO_PALETTES)]
         prev_pal_name = pal_name
         palette = PALETTES[pal_name]
@@ -4044,6 +4330,69 @@ def main():
             f"{section.label} #{inst} energy={e:.2f} -> {n_active}/{n_cast} targets lit "
             f"({n_active/n_cast*100:.0f}%), {n_feature} feature, palette={pal_name}")
 
+    # --- DROP/FADE CYCLE HOLDS ---------------------------------------------
+    # One shader per cycle on every big canvas, from the kick that starts the
+    # drop to the kick that starts the next one. A dedicated pass rather than
+    # a rule inside the section loop, for the reason this project has hit
+    # three times now: section-driven placement only fires when a canvas is in
+    # that section's active set, and across a quiet intro that is nearly
+    # never, so the gesture silently disappears instead of landing.
+    #
+    # "There is a single kick drum for each drop and everything between that
+    # and the next single kick drum is the slow fade... It all needs to be
+    # synced to the kick drum."
+    n_cycle = 0
+    # Protected from the clipping passes below. These holds ARE the intro's
+    # structure -- a blackout or a run-up dip trimming one leaves the canvas
+    # dark for part of a fade and puts the next change off the kick, which is
+    # the whole complaint. Measured: two of Gooey's five cycles lost their
+    # spans this way before the exemption.
+    _cycle_ids: set[int] = set()
+    if drop_cycles:
+        # EVERY recognisable prop, not just the big canvases. Measured at
+        # t=35s, deep inside a fade: the canvases were correctly down at ~40%
+        # of nominal, and `Flake I 1` -- which is not "large" and so never got
+        # the envelope -- was putting out 34% of ALL the light on the house by
+        # itself, holding the floor up so the next kick could only lift 1.2x.
+        # The gesture is the whole display decaying together.
+        cyc_canvases = [t for t in cast if prominence_of(t) >= 2]
+        cyc_rng = random.Random(f"{SONG_NAME}|drop-cycles")
+        for ci, (c0, c1) in enumerate(drop_cycles):
+            # One shader for the whole cycle, shared across the canvases so
+            # they read as one surface, changing only on the next drop.
+            key = cyc_rng.choice([k for k in SHADER_KEYS
+                                  if is_palette_driven(k) and not is_centred(k)]
+                                 or SHADER_KEYS)
+            si_at = next((i for i, sec in enumerate(analysis.sections)
+                          if sec.start_time <= c0 < sec.end_time), 0)
+            _sm = section_meta[si_at] if si_at < len(section_meta) else {}
+            pal = (_sm.get("palette") if isinstance(_sm, dict) else None) or PALETTES["ice"]
+            s_ms, e_ms = int(c0 * 1000), int(c1 * 1000)
+            for seat, tgt in enumerate(cyc_canvases):
+                # Big canvases carry the shader; everything else simply glows
+                # and decays with it, so the fade is one gesture across the
+                # house rather than a few props doing it over a lit floor.
+                _k = key if tgt.get("large") else "wash"
+                p = palette_variant(pal, seat) if is_palette_driven(_k) else pal
+                p = fade_palette(p)
+                cohort_marks.update((s_ms, e_ms))
+                # Track the actual effect OBJECTS, not (name, start, end).
+                # add()/add_target snap times to the frame grid and later
+                # passes rewrite them again, so a tuple key recorded here
+                # stops matching and the exemption silently does nothing --
+                # which is exactly how cycle 4 of Gooey's intro ended up
+                # clipped to a 75ms fragment while the others survived.
+                _n0 = len(effects)
+                add_target(tgt, L_BASE, _k, s_ms, e_ms, p)
+                for _e in effects[_n0:]:
+                    _cycle_ids.add(id(_e))
+                n_cycle += 1
+            log(c0, "drop-cycle",
+                f"cycle {ci + 1}/{len(drop_cycles)}: {key} held "
+                f"{c1 - c0:.1f}s across {len(cyc_canvases)} canvases")
+        print(f"Drop/fade cycle holds: {n_cycle} "
+              f"({len(drop_cycles)} cycles x {len(cyc_canvases)} canvases)")
+
     print(f"Staging: {dict(role_counts)}")
     print(f"After orchestration: {len(effects)} effects")
 
@@ -4194,7 +4543,20 @@ def main():
     # spaced; an R&B kick covers many beats while syncopating between them.
     # Median spacing near one beat is what actually distinguishes them.
     _even = kick_v is not None and kick_v.median_ipi_beats <= 1.35
-    if _kick_cov >= 0.75 and _even:
+    # ...AND the song has to actually drive. So Easy (To Fall in Love) passes
+    # both kick tests -- 94% coverage, median spacing 1.25 beats, and its
+    # tempo is genuinely 143.6 (checked for half-time detection: its beats
+    # show no strong/weak alternation) -- yet Krists heard it as wrong:
+    # "it seems like it's in 4-on-the-floor mode but it's a mellow song."
+    #
+    # He is right, and the kick pattern cannot see it. What separates that
+    # song is how PERCUSSIVE it is: its drums stem carries 0.441 of the mix's
+    # RMS, the lowest in the library by a clear step (next is Gooey at 0.548,
+    # up to Aperture at 0.773). A soft kick landing on every beat of a ballad
+    # is not four-on-the-floor in the sense that matters here -- flashing the
+    # house on all 143 of those beats per minute is.
+    _drive = percussive_ratio() >= 0.50
+    if _kick_cov >= 0.75 and _even and _drive:
         pulse_mode = "quarter"
     elif kick_v is not None and len(kick_v) >= 24:
         pulse_mode = "groove"          # kick (+ snare backbeat) drives it
@@ -4451,7 +4813,28 @@ def main():
                         if bar_i % 2 == 1:
                             idx = len(parts) - 1 - idx
                         t_ms = int(ht * 1000)
-                        add(f"{prop}/{parts[idx]}", L_PULSE, "on_pop",
+                        # SHAPE, not just a pop. "Doing single strand chases
+                        # and fans and radials and stuff like that on the
+                        # submodels instead of the whole model can look cool
+                        # because it traces a certain shape."
+                        #
+                        # The part is stepped with an effect chosen for what
+                        # that part IS: spokes/arms/petals get a fan opening
+                        # or a rotation, rings and circles get a radial burst,
+                        # anything else a chase along its length. `on_pop`
+                        # stays in the rotation so the plain hit is still
+                        # available -- it is what makes the stepping read as
+                        # rhythm rather than as continuous motion.
+                        _low = parts[idx].lower()
+                        if any(w in _low for w in ("spoke", "arm", "petal",
+                                                   "whirl", "spinner", "flower")):
+                            _shape = ["chase_mid_out", "pinwheel", "on_pop"]
+                        elif any(w in _low for w in ("ring", "circle")):
+                            _shape = ["shockwave", "ripple_explode", "on_pop"]
+                        else:
+                            _shape = ["chase_lr", "chase_rl", "on_pop"]
+                        add(f"{prop}/{parts[idx]}", L_PULSE,
+                            _shape[(hi + idx) % len(_shape)],
                             t_ms, t_ms + step_ms, pal)
                         n_submodel += 1
     print(f"Submodel beat movement: {n_submodel} steps through "
@@ -4487,6 +4870,30 @@ def main():
             # back starting at the end of that last arch." Playing each
             # endpoint twice -- once outbound, once inbound -- puts the turn
             # where the eye expects it.
+            # THREE LEAP MODES, rotated per section. "In addition to just the
+            # single chase going back and forth across all four arches, could
+            # we also add a mode that has 2 chases going back and forth on two
+            # arches each, as well as a mode with 4 chases each just going back
+            # and forth on a single arch? It would provide more variety."
+            #
+            # Each mode is a list of GROUPS, and every group runs its own
+            # there-and-back cycle simultaneously:
+            #   "sweep"  one chase over all four arches (the original)
+            #   "pairs"  two chases, each over half the arches
+            #   "solo"   one chase per arch, all bouncing at once
+            # Playing each endpoint twice keeps the turn where the eye expects
+            # it, exactly as the single sweep already does.
+            def _cycle(idxs):
+                return list(idxs) + list(reversed(idxs))
+
+            half = max(1, n_a // 2)
+            leap_modes = {
+                "sweep": [_cycle(range(n_a))],
+                "pairs": [_cycle(range(0, half)), _cycle(range(half, n_a))],
+                "solo": [_cycle([i]) for i in range(n_a)],
+            }
+            _mode_names = ["sweep", "pairs", "solo"]
+            _leap_mode_offset = random.Random(f"{SONG_NAME}|leapmode").randrange(3)
             cycle = list(range(n_a)) + list(range(n_a - 1, -1, -1))
             for si, section in enumerate(analysis.sections):
                 # Only where the pulse is genuinely steady and the section has
@@ -4500,8 +4907,17 @@ def main():
                     continue
                 pal = section_meta[si].get("palette") or PALETTES["gold"]
                 hold = max(160, min(int(beat_ms * 0.9), 460))
+                # Which mode this section uses. Deterministic per song and
+                # section so a song moves through the three rather than
+                # settling on one, and so re-running gives the same show.
+                mode = _mode_names[(si + _leap_mode_offset) % len(_mode_names)]
+                groups = leap_modes[mode]
+                log(section.start_time, "leaping-arches",
+                    f"mode={mode} ({len(groups)} simultaneous chase"
+                    f"{'s' if len(groups) > 1 else ''})")
                 for bi, bt in enumerate(sec_b):
-                    m = arch_order[cycle[bi % len(cycle)]]
+                  for _g in groups:
+                    m = arch_order[_g[bi % len(_g)]]
                     # Authoritative in its own sections. Anchors are already
                     # kept off the arches here (see leap_sections), so the
                     # remaining claims come from passes whose arch content this
@@ -4516,13 +4932,15 @@ def main():
                     # consecutive arches fire in sequence the whole run reads
                     # as one leap moving across the house. Alternating
                     # direction on the turn-around keeps it leaping back.
-                    fwd = (bi % len(cycle)) < n_a
+                    # Direction is per GROUP now: each simultaneous chase
+                    # turns around at its own end, so in "solo" mode all four
+                    # arches bounce independently rather than sharing the
+                    # single sweep's turn.
+                    fwd = (bi % len(_g)) < max(1, len(_g) // 2)
                     add(m, L_PULSE, "chase_lr" if fwd else "chase_rl",
                         t_ms, t_ms + hold, pal)
                     n_leap += 1
-                log(section.start_time, "leaping-arches",
-                    f"{n_a} arches leaping there-and-back on the quarter note")
-    print(f"Leaping arches: {n_leap} steps")
+    print(f"Leaping arches: {n_leap} steps ({len(_mode_names)} modes rotating)")
 
     # --- 2-pre-a4. LONG LINEAR PROPS FLASH TOO ------------------------------
     #
@@ -4539,10 +4957,21 @@ def main():
     # "the horizontals at the top and bottom of each matrix don't seem to do
     # smooth slow motion anymore, but are doing something more fast and erratic
     # now." Those props are meant to be the calm layer.
+    # Long runs in EITHER direction. `spread_x >= 40` alone meant only the
+    # horizontal gutter runs ever qualified -- the verticals are tall, not
+    # wide, so they were structurally excluded and could only ever move:
+    # "I only see the c9s and verticals/horizontals flashing or pulsing in
+    # groove mode or only in a couple of songs, most songs I don't see it
+    # happening and the c9s etc only do movement."
+    #
+    # The matrix HORIZONTALS stay out on purpose. They are the calm layer --
+    # putting beat flashes on top of their slow sway is exactly what produced
+    # "the horizontals don't seem to do smooth slow motion anymore, but are
+    # doing something more fast and erratic now."
     gutter_props = [t for t in cast
                     if t["cat"] in ("single_line", "icicle")
                     and t["n"] >= 3
-                    and t.get("spread_x", 0) >= 40
+                    and (t.get("spread_x", 0) >= 40 or t.get("spread_y", 0) >= 40)
                     and "horizontal" not in t["name"].lower()]
     for si, section in enumerate(analysis.sections):
         if si not in ens_flash_sections or not gutter_props:
@@ -4672,6 +5101,14 @@ def main():
                 # largest scale. A gentle house-wide swell on each beat gives
                 # the whole facade a pulse under everything else -- pumping it
                 # any harder would read as the house strobing.
+                # Inside a drop/fade cycle the bed steps aside. It spans EVERY
+                # prop at once, so it -- not the section staging -- is what
+                # holds the floor up while a fade is supposed to be decaying:
+                # with the cycle holds and the cast cut back, the display
+                # still only fell to 40-62 between kicks. The cycle holds are
+                # the bed for that passage, and they carry the decay envelope.
+                if any(c[0] - 0.3 <= s_ms / 1000.0 < c[1] for c in drop_cycles):
+                    continue
                 _bed_pal = beat_pulse_palette(pal, beats, s_ms, e_ms, 0.4)
                 add(HOUSE_GROUP, L_BASE, slow_key, s_ms, e_ms, _bed_pal, SPAN)
                 n_house += 1
@@ -5194,6 +5631,31 @@ def main():
     _drops = [c for c in cutouts if c.get("dropout")]
     _rest = sorted((c for c in cutouts if not c.get("dropout")),
                    key=lambda ev: -ev.get("drop_energy", 0))
+    # A CYCLE START IS NOT THE MAIN DROP. In a drop-and-fade passage every
+    # cycle begins with a big hit, so the detectors see each one as a drop --
+    # but only the LAST one is where the track actually opens up:
+    #
+    #   "The main drop after the intro where the full track starts is right at
+    #    1:00, there is a false drop before that where bass starts but then it
+    #    should cut out before the main big drop."
+    #
+    # Measured on Gooey: candidates at 48.95 and 59.93, both staged as full
+    # implosions. 48.95 is the fifth cycle's opening kick -- the bass entering
+    # over the fade -- and 59.99 is where the kick becomes continuous. Demoted
+    # here rather than dropped, so the cycle still gets its hit; it just does
+    # not get the whole-display blackout-and-slam reserved for a real drop.
+    if drop_cycles:
+        _cycle_starts = [c[0] for c in drop_cycles]
+        _main = drop_cycles[-1][1]
+        _demoted = [ev for ev in (_drops + _rest)
+                    if any(abs(ev["drop_time"] - cs) < 1.5 for cs in _cycle_starts)
+                    and abs(ev["drop_time"] - _main) >= 1.5]
+        if _demoted:
+            print(f"  false drops (cycle starts, not the main drop): "
+                  f"{', '.join(f'{ev['drop_time']:.1f}s' for ev in _demoted)}")
+        _keep = [ev for ev in _drops if ev not in _demoted]
+        _rest = [ev for ev in _rest if ev not in _demoted]
+        _drops = _keep
     cutouts = (_drops + _rest)[:6]
     cutouts.sort(key=lambda ev: ev["cutout_start"])
     blackout_windows = []
@@ -5335,6 +5797,9 @@ def main():
             return effects_list
         out = []
         for eff in effects_list:
+            if id(eff) in _cycle_ids:
+                out.append(eff)
+                continue
             if eff.layer not in (L_BASE, L_MOTION, L_PULSE):
                 out.append(eff)
                 continue
@@ -5476,7 +5941,7 @@ def main():
     if dip_windows:
         kept = []
         for eff in effects:
-            if eff.layer in (L_BASE, L_MOTION):
+            if id(eff) not in _cycle_ids and eff.layer in (L_BASE, L_MOTION):
                 s_s, e_s = eff.start_time_ms / 1000.0, eff.end_time_ms / 1000.0
                 hit_i = next((i for i, (a, b) in enumerate(dip_windows)
                               if s_s < b and e_s > a), None)
@@ -5505,10 +5970,6 @@ def main():
     # "hit then fade" gesture here, whatever small amount of ambient/pulse
     # activity is already scheduled for a quiet section just looks like
     # unmotivated flicker instead of following the music's actual story.
-    big_hits = detect_big_hits(
-        analysis,
-        kick_times=(voices["kick"].onsets if "kick" in voices else None),
-        downbeats=downbeats)
     drop_times_used = {int(ev["drop_time"] * 1000) for ev in cutouts}
     # A moderate slice of the cast, not literally everyone -- this needs to
     # read as a clear "hit then fade" gesture, but shouldn't be the same
@@ -5752,6 +6213,134 @@ def main():
     # times, so it renders the same; correctness costs nothing here.
     TUNNEL_MIRROR_SRC = "Tunnel Matrix Real"
     TUNNEL_MIRROR_DST = "Tunnel"
+    # --- flash-rate cap, per prop ----------------------------------------
+    # "There are a few points where we flash/pulse the matrices too fast, and
+    # it looks like strobing, where it's to 8th notes or something. There's
+    # also at least one point where the floods strobe like that."
+    #
+    # The 2-4 flashes/second rule has been stated since early on, but it lived
+    # as a guideline inside individual passes, so every new pass had to
+    # remember it and any two passes could stack on the same prop and break it
+    # between them. Measured: short bursts landing 200ms apart on one prop,
+    # i.e. 5 Hz. This enforces it once, at the end, where the whole picture is
+    # visible -- the only place the rule can actually be guaranteed.
+    #
+    # Per PROP, so a chase travelling across many props at speed is untouched;
+    # what is capped is one prop flashing at the viewer.
+    _MIN_FLASH_GAP_MS = 240             # ~4 flashes/second
+    _FLOOD_FLASH_GAP_MS = 400           # floods get more room: big, bright, close
+    # A parent-level cap was tried and reverted: it dropped 2286 flashes
+    # instead of 737 and removed none of the remaining fast runs, because
+    # those turned out not to be flashes at all -- see the house-bed note in
+    # shader_span_test.py.
+    _dropped = set()
+    for key, gap in (("sub", _MIN_FLASH_GAP_MS),):
+        by_prop: dict[str, list] = defaultdict(list)
+        for eff in effects:
+            if id(eff) in _dropped:
+                continue
+            if eff.end_time_ms - eff.start_time_ms <= 400:
+                nm = (eff.model_name if key == "sub"
+                      else eff.model_name.split("/")[0])
+                by_prop[nm].append(eff)
+        for nm, evs in by_prop.items():
+            g = _FLOOD_FLASH_GAP_MS if "flood" in nm.lower() else gap
+            last = -10 ** 9
+            for eff in sorted(evs, key=lambda e: e.start_time_ms):
+                if eff.start_time_ms - last < g:
+                    _dropped.add(id(eff))
+                else:
+                    last = eff.start_time_ms
+    if _dropped:
+        effects = [e for e in effects if id(e) not in _dropped]
+    print(f"Flash-rate cap: dropped {len(_dropped)} flashes closer than "
+          f"{_MIN_FLASH_GAP_MS}ms on the same prop")
+
+    # --- inside a drop/fade cycle, the cycle IS the content ---------------
+    # "There is a single kick drum for each drop and everything between that
+    # and the next single kick drum is the slow fade."
+    #
+    # Adding the fade envelope to more props kept making the fade WORSE, and
+    # the reason shows up in a per-prop reading at t=35s: the canvases were
+    # correctly down at ~40% of nominal while the rest of the show -- beat
+    # anchors, submodel stepping, gutter flashes, leaping arches, ambient
+    # washes -- carried on at full level underneath, so each new fading layer
+    # only added light on top of a floor that never moved. Five attempts at
+    # shaping the fade all landed between 1.1x and 1.8x for that reason.
+    #
+    # In this passage the cycle hold and the hit that starts it are the whole
+    # gesture, so everything else inside the cycle window comes out. The hit
+    # itself (anything landing within 0.6s of a cycle start) stays.
+    if drop_cycles:
+        _c0 = drop_cycles[0][0]
+        _c1 = drop_cycles[-1][1]
+        _starts = [c[0] for c in drop_cycles]
+        _kept, _cut = [], 0
+        for eff in effects:
+            s_s = eff.start_time_ms / 1000.0
+            if not (_c0 <= s_s < _c1) or id(eff) in _cycle_ids:
+                _kept.append(eff)
+                continue
+            if any(0.0 <= s_s - cs <= 0.6 for cs in _starts):
+                _kept.append(eff)       # the hit that opens the cycle
+                continue
+            _cut += 1
+        effects = _kept
+        print(f"Drop/fade cycles: cleared {_cut} competing effects between "
+              f"{_c0:.1f}s and {_c1:.1f}s")
+
+    # --- rebuild beat-pulse curves for the FINAL span --------------------
+    # A brightness value curve is stored with its times normalised 0-1 across
+    # the effect's own span, so ANY pass that shortens an effect after the
+    # curve was attached squeezes the whole pulse into the time that is left.
+    # Three passes do exactly that -- blackout clipping, the run-up dip, and
+    # the cohort lock -- and none of them knew about the curve.
+    #
+    # Measured on So Easy: a Plasma hold ended up 1300ms long still carrying a
+    # curve built for a much longer span, with peaks every ~104ms. That is
+    # 9.6 Hz on a whole matrix, which is exactly the "flash/pulse the matrices
+    # too fast, it looks like strobing" report, and it is a migraine risk
+    # rather than a taste question.
+    #
+    # Rebuilding from the final times is better than dropping the curve: the
+    # effect still pulses, on the beats it actually spans. The depth is
+    # recovered from the curve's own peak, since that is where it was encoded.
+    _rebuilt = 0
+    for eff in effects:
+        # Cycle holds carry a HIT-AND-DECAY envelope, not a beat pulse. This
+        # pass would read that curve, recover a "depth" from its peak, and
+        # replace it with a pulse -- silently destroying the fade. That is why
+        # five successive attempts at shaping the intro fade measured between
+        # 1.1x and 1.8x no matter what was changed upstream: the shape was
+        # being written correctly and then overwritten here.
+        if id(eff) in _cycle_ids:
+            continue
+        pal = eff.palette
+        if pal is None or not pal.extra_parts:
+            continue
+        vc = next((x for x in pal.extra_parts
+                   if x.startswith("C_VALUECURVE_Brightness=")), None)
+        if vc is None or "Type=Custom" in vc is False:
+            continue
+        m = re.search(r"Values=([0-9.:;]+)", vc)
+        if not m:
+            continue
+        try:
+            vals = [float(p.split(":")[1]) for p in m.group(1).split(";") if ":" in p]
+        except (ValueError, IndexError):
+            continue
+        if not vals:
+            continue
+        depth = max(0.0, min(1.0, (max(vals) / VC_NOMINAL - 1.0) / 0.55))
+        base = pal.model_copy(update={
+            "extra_parts": [x for x in pal.extra_parts if x is not vc]})
+        new = beat_pulse_palette(base, beats, eff.start_time_ms,
+                                 eff.end_time_ms, depth)
+        if new is not base or True:
+            eff.palette = new
+            _rebuilt += 1
+    print(f"Pulse curves rebuilt for final spans: {_rebuilt}")
+
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
         effects.extend(e.model_copy(update={"model_name": TUNNEL_MIRROR_DST})
