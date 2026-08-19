@@ -92,8 +92,28 @@ def main() -> None:
         print(f"  reddest moments: " + ", ".join(
             f"{int(t) // 60}:{int(t) % 60:02d} ({r * 100:.0f}%)" for r, t in hot[:8]))
 
-    ok = mean_red <= RED_MEAN_OK and peak_red <= RED_PEAK_OK
-    print(f"\n  VERDICT: {'OK' if ok else 'TOO RED -- check palette lead colours'}")
+    # A brief red moment is fine; red STUCK ON is the failure this exists for.
+    #
+    # The check was written after props rendered flat saturated red for ~50
+    # CONTINUOUS seconds, and a peak-only gate cannot tell that apart from one
+    # deliberately red bar. Measured on Corners of the Earth: exactly 1 sampled
+    # frame of 545 crossed the ceiling (32% at 0:29) with a 0.9% mean, and it
+    # failed the old gate -- while Krists had just said the opposite of what
+    # the gate assumes: "that doesn't mean we should aim for zero red, it's
+    # fine to have that color."
+    #
+    # So the verdict is now about SUSTAINED red: how long the display stays
+    # red-dominated in a row. Brief peaks pass; a stuck prop still does not.
+    red_series = [r for r, _t in sorted(worst, key=lambda x: x[1])]
+    run = best_run = 0
+    for r in red_series:
+        run = run + 1 if r > RED_PEAK_OK else 0
+        best_run = max(best_run, run)
+    sustained_s = best_run * stride * f.step_time_ms / 1000.0
+    ok = mean_red <= RED_MEAN_OK and sustained_s <= 4.0
+    if sustained_s:
+        print(f"  longest continuously red-dominated stretch: {sustained_s:.1f}s")
+    print(f"\n  VERDICT: {'OK' if ok else 'TOO RED -- red is stuck on, not just present'}")
 
 
 if __name__ == "__main__":

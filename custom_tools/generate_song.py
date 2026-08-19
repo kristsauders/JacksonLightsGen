@@ -919,7 +919,9 @@ PALETTES: dict[str, ColorPalette] = {
     # near-primary a shader's rendering can amplify into looking like an
     # error state. Still unmistakably a Christmas red, just not one two
     # unrelated shaders can turn into "half the display is red."
-    "xmas":   ColorPalette(colors=["#00E83C", "#FFFFFF", "#B33A3A"], active_colors=[1, 2, 3]),
+    # Real Christmas red again (was softened to #B33A3A when red was being
+    # suppressed wholesale -- see RED_PALETTES).
+    "xmas":   ColorPalette(colors=["#00E83C", "#FFFFFF", "#E02A2A"], active_colors=[1, 2, 3]),
     "gold":   ColorPalette(colors=["#FFD700", "#FFFFFF", "#FF8C00"], active_colors=[1, 2, 3]),
     "candy":  ColorPalette(colors=["#FF3FA4", "#FFFFFF", "#00D9FF"], active_colors=[1, 2, 3]),
     "white":  ColorPalette(colors=["#FFFFFF", "#C0E8FF"], active_colors=[1, 2]),
@@ -965,6 +967,27 @@ PALETTES: dict[str, ColorPalette] = {
 # palette choice among the others rather than a property of the shader.
 # Three of them, so a mono section still has a character of its own: cold,
 # warm, and a dim near-black.
+# RED IS ALLOWED AGAIN. The red measurement exists because early versions had
+# props rendering as flat saturated red when an effect failed -- 35-68% of lit
+# pixels for ~50 continuous seconds -- and the palettes were pulled back hard
+# in response, to the point where the library measured 0.0-0.2% red. That
+# overshot: "I know we measured the amount of red in each song because we
+# originally had issues with some things not rendering so they looked just
+# red, but that doesn't mean we should aim for zero red, it's fine to have
+# that color."
+#
+# So `xmas` gets a real Christmas red back (#E02A2A, not the muted berry it
+# was softened to), and there is a red-led family. The verifier still reports
+# red as a share of lit pixels, which is what catches the actual failure mode;
+# the human reference band is 0.3-11% with peaks to 27%, and being far BELOW
+# it is its own kind of wrong.
+RED_PALETTES: dict[str, ColorPalette] = {
+    "holly":  ColorPalette(colors=["#E02A2A", "#0FA958", "#FFF3D6"],
+                           active_colors=[1, 2, 3]),
+    "cherry": ColorPalette(colors=["#FF2D3C", "#7A0B2E", "#FFC46B"],
+                           active_colors=[1, 2, 3]),
+}
+
 MONO_PALETTES: dict[str, ColorPalette] = {
     "ash":    ColorPalette(colors=["#FFFFFF", "#9AA6B2", "#3C4650"],
                            active_colors=[1, 2, 3]),
@@ -1002,10 +1025,24 @@ MOOD_PALETTES: dict[str, ColorPalette] = {
 }
 PALETTES.update(MOOD_PALETTES)
 PALETTES.update(MONO_PALETTES)
+PALETTES.update(RED_PALETTES)
 
 # One family per song, chosen for that track's mood, plus two neighbours to
 # rotate through so a long song still evolves without leaving its identity.
 SONG_PALETTE_FAMILY: dict[str, list[str]] = {
+    # The 2026-08-16 batch: seven cinematic/atmospheric tracks (four ODESZA,
+    # CloZee, Catching Flies, ROYA). Chosen by ear against each track's
+    # character rather than left to the random fallback, which draws from the
+    # older PAL_CYCLE set and would have given these the Christmas-primary
+    # look rather than the moodier one they want. Two of them carry a red
+    # family, now that red is wanted again.
+    "Corners of the Earth": ["regal", "smoulder", "holly"],
+    "Meridian": ["abyss", "chrome", "neon"],
+    "This Version of You": ["dusk", "velvet", "glacier"],
+    "The Last Goodbye": ["peach", "cherry", "regal"],
+    "Harmony (Axel Thesleff Remix)": ["grove", "abyss", "velvet"],
+    "Ojai": ["resin", "peach", "grove"],
+    "Cruise": ["cinema", "chrome", "dusk"],
     "ENIGMA":                    ["abyss", "glacier", "regal"],
     "Gooey":                     ["resin", "abyss", "grove"],
     "The WhatsApp Shakespeare":  ["velvet", "smoulder", "regal"],
@@ -1019,7 +1056,8 @@ SONG_PALETTE_FAMILY: dict[str, list[str]] = {
     "The Ambition (Girls Trip)": ["regal", "neon", "smoulder"],
 }
 
-PAL_CYCLE = ["ice", "violet", "toxic", "ember", "gold", "xmas", "candy"]
+PAL_CYCLE = ["ice", "violet", "toxic", "ember", "gold", "xmas", "candy",
+             "holly", "cherry"]
 # How many of PAL_CYCLE's palettes a single song actually uses. Direct
 # feedback: "we keep changing color palettes each section, it's a bit
 # disjointed... limit the palette a little, don't go too far." Cycling
@@ -2627,6 +2665,39 @@ def main():
     cue_log: list[dict] = []
 
     def add(target_name, layer, key, start_ms, end_ms, palette, extra=None):
+        # NOTHING BIG FLAT-FLASHES -- enforced HERE, at the one function every
+        # placement goes through.
+        #
+        # "There are some parts where I notice the whole mega tree and arch
+        # tunnel / tunnel matrix flashing but I thought we made a rule not to
+        # do that because they're too big to flash, it's just too much for the
+        # eyes in person. And I'm not talking about pulsing, it's full flashing
+        # from on to off and on again."
+        #
+        # There WAS such a rule, in add_target, and it covered only cones.
+        # Measured on Gooey v126: the Mega Tree still made 75 full
+        # dark-to-bright-to-dark transitions and the Tunnel Matrix 33, because
+        # the drop staging, big-hit and signature passes reach `add()`
+        # directly -- either by model name or through a group broadcast -- and
+        # never saw the guard. Putting it at the bottom of the stack is the
+        # only way it actually holds.
+        #
+        # Substituted, not dropped: the moment still lands, as a burst that
+        # travels across the prop rather than a slab of colour switching on.
+        if key in FLAT_KEYS and target_name in FLASH_SPLIT:
+            # A GROUP holding a big prop: flash its other members instead of
+            # the group. Substituting a shaped effect is not enough here --
+            # a Shockwave across a yard-wide group still sweeps the Mega Tree
+            # from dark to full and back, which measured slightly WORSE than
+            # the flat flash it replaced (42 -> 45 transitions). The gesture
+            # belongs to the small props in the group; the big one simply sits
+            # it out and keeps running whatever it was showing.
+            for _m in FLASH_SPLIT[target_name]:
+                add(_m, layer, key, start_ms, end_ms, palette, extra)
+            return
+        if key in FLAT_KEYS and target_name in NO_FLAT_PROPS:
+            key = ("chase_mid_out" if target_name in CONE_SHAPED
+                   else "shockwave")
         name, settings = EFFECTS[key]
         if extra:
             settings = {**settings, **extra}
@@ -2659,6 +2730,42 @@ def main():
     SPAN_SENSITIVE_KEYS = {"curtain_close", "curtain_open", "ripple_implode", "ripple_explode"}
 
     FLAT_KEYS = {"on_hit", "on_pop", "on_swell", "wash"}
+    # Every prop too big to flash: the cones and every large canvas, plus the
+    # member models a group placement broadcasts to (the Tunnel Matrix is
+    # reached both ways). Derived from the cast, so a prop Krists adds later
+    # is covered without a code edit.
+    NO_FLAT_PROPS = set(CONE_SHAPED)
+    for _t in cast:
+        if _t.get("large") or _t["name"] in CONE_SHAPED:
+            NO_FLAT_PROPS.add(_t["name"])
+            NO_FLAT_PROPS.update(_t.get("members") or [])
+    # ...and any GROUP that contains one of them. This is where the Mega Tree
+    # flashing actually came from: `All Yard Props` is a group, so it is not
+    # itself "large" and passed the guard, but the Mega Tree is a member and
+    # xLights broadcasts the flash to it. Measured on Gooey, 45 of the tree's
+    # full dark-to-bright transitions after the intro trace to 300ms flashes
+    # placed on that one group.
+    #
+    # A flat flash on a group is only ever as safe as its biggest member.
+    # Membership has to come from the LAYOUT, not from the cast.
+    #
+    # A cast target's `members` list is our own bookkeeping and is not what
+    # xLights broadcasts to: measured, the cast thinks "All Yard Props" has 80
+    # members and that the Mega Tree is not among them, while the xLights
+    # group definition says it is -- so a flat flash placed on that group lit
+    # the tree anyway, and every guard keyed on the cast's view missed it.
+    # What matters is what the renderer will do.
+    _xgroups = layout.get("xlights_model_groups") or {}
+    FLASH_SPLIT: dict[str, list[str]] = {}
+    for _gname, _mem in _xgroups.items():
+        if _gname in NO_FLAT_PROPS or not _mem:
+            continue
+        if any(_m in NO_FLAT_PROPS for _m in _mem):
+            _safe = [_m for _m in _mem if _m not in NO_FLAT_PROPS]
+            if _safe:
+                FLASH_SPLIT[_gname] = _safe
+            else:
+                NO_FLAT_PROPS.add(_gname)
 
     def add_target(target, layer, key, start_ms, end_ms, palette, extra=None):
         # NOTHING FLAT-FLASHES A CONE. "There are parts in Gooey where the
@@ -3366,9 +3473,29 @@ def main():
         n = t["name"].lower()
         return "window matri" in n and "/" not in t["name"]
 
+    # THE BIGGEST PROPS ARE NEVER ANCHORS.
+    #
+    # An anchor has its ambient fill deliberately suppressed so its flash has
+    # darkness to come out of. On a small prop that reads as a beat. On the
+    # Mega Tree or the Tunnel Matrix it reads as the whole thing switching
+    # off and on -- "it's full flashing from on to off and on again. The
+    # biggest props shouldn't do that."
+    #
+    # Note this is NOT fixed by giving them a shaped hit instead of a flat
+    # one: measured on Gooey v126, with beat_hit_key already substituting a
+    # Shockwave, the Mega Tree still made 75 full dark-to-bright-to-dark
+    # transitions and the Tunnel Matrix 33. What makes it a flash is the prop
+    # being DARK between hits, not the shape of the hit. Keeping them out of
+    # the anchor role leaves their content running, so the beat shows up as
+    # the brightness pulse Krists does want ("I like when they gently pulse
+    # brightness under another effect") rather than as a slab switching.
+    def _too_big_to_flash(t: dict) -> bool:
+        return bool(t.get("large")) or t["name"] in CONE_SHAPED
+
     anchor_cands = [t for t in cast
                     if not t.get("slow")
                     and not _is_window_face(t)
+                    and not _too_big_to_flash(t)
                     and prominence_of(t) >= 2
                     and t["name"] not in movement_props]
     if not anchor_cands:                  # every candidate is already busy
@@ -3533,7 +3660,40 @@ def main():
             t = nxt
             if len(out) > 24:
                 break
-        return out
+        # A DROP AND FADE HAS TO ACTUALLY FADE. Evenly spaced isolated kicks
+        # are necessary but not sufficient: on a sparse, low-percussion track
+        # the kick is naturally that thin all the way through, so this claimed
+        # the entire back half of This Version of You (76.7-173.5s of a 172s
+        # song) and the clearing pass then stripped 10,652 effects out of it,
+        # leaving the song at 5,842 placements where its peers run 26-45k.
+        #
+        # What separates the two is measurable. Gooey's cycles fall 1.48-2.09x
+        # from the hit to the tail; This Version of You's middle cycles sit at
+        # 0.93-1.24x -- flat, because that passage is sustained rather than
+        # decaying. Require a real decay, and require at least two consecutive
+        # cycles to show it, so a single fade-out at the end of a song does
+        # not turn the whole song into cycles.
+        rms = np.asarray(analysis.spectrum.rms_energy)
+        rt = np.asarray(analysis.spectrum.rms_times)
+
+        def _decays(c0: float, c1: float) -> bool:
+            head = rms[(rt >= c0) & (rt < c0 + 1.2)]
+            tail = rms[(rt >= c1 - (c1 - c0) * 0.25) & (rt < c1)]
+            if not len(head) or not len(tail):
+                return False
+            return float(head.mean() / max(tail.mean(), 1e-9)) >= 1.40
+
+        runs, cur = [], []
+        for c in out:
+            if _decays(*c):
+                cur.append(c)
+            else:
+                if len(cur) >= 2:
+                    runs.extend(cur)
+                cur = []
+        if len(cur) >= 2:
+            runs.extend(cur)
+        return runs
 
     drop_cycles = _drop_cycles()
     if drop_cycles:
@@ -4390,6 +4550,31 @@ def main():
             log(c0, "drop-cycle",
                 f"cycle {ci + 1}/{len(drop_cycles)}: {key} held "
                 f"{c1 - c0:.1f}s across {len(cyc_canvases)} canvases")
+        # SOMETHING STAYS ON THROUGH THE FADE. "Maybe when everything is
+        # fading in the intro we could leave something still on, like some
+        # outlines or something, so it's not like completely everything fades
+        # away."
+        #
+        # A steady, dim hold across the WHOLE passage rather than per cycle:
+        # it should not breathe with the drops, it should be the constant the
+        # drops happen against. Outlines are the right prop for it -- thin,
+        # architectural, and they read as the house still being there.
+        keepers = [t for t in cast
+                   if (t["cat"] in ("single_line", "icicle")
+                       or any(h in t["name"].lower() for h in OUTLINE_NAME_HINTS))
+                   and "/" not in t["name"]][:6]
+        if keepers:
+            _k0, _k1 = int(drop_cycles[0][0] * 1000), int(drop_cycles[-1][1] * 1000)
+            _dim = PALETTES["ice"].model_copy(update={"extra_parts": [
+                "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.00:0.09;1.00:0.09"]})
+            for tgt in keepers:
+                _n0 = len(effects)
+                add_target(tgt, L_BASE, "wash", _k0, _k1, _dim)
+                for _e in effects[_n0:]:
+                    _cycle_ids.add(id(_e))
+            print(f"Drop/fade cycles: {len(keepers)} outlines held on through "
+                  f"the fades ({', '.join(t['name'] for t in keepers[:3])}...)")
         print(f"Drop/fade cycle holds: {n_cycle} "
               f"({len(drop_cycles)} cycles x {len(cyc_canvases)} canvases)")
 
@@ -5712,12 +5897,26 @@ def main():
             range(len(cutouts)),
             key=lambda i: -cutouts[i].get("drop_energy", 0)).index(ci_drop)
         full_blackout = is_climax_drop or energy_rank < max(1, len(cutouts) // 3)
+        # SAVE SOMETHING FOR LATER. "Don't go 100% on the first moment in the
+        # song, save some stuff for later drops and moments."
+        #
+        # Ranking purely by measured energy will happily spend the biggest
+        # gesture in the show on the first drop, which leaves the later ones
+        # -- often the real payoff on these tracks -- with nowhere to go. The
+        # first staged moment therefore never takes a full blackout unless it
+        # genuinely IS the song's climax, and its hold is shorter. Everything
+        # after it is unaffected, so the escalation comes from withholding at
+        # the start rather than from inflating the end.
+        _is_first = ci_drop == 0
+        if _is_first and not is_climax_drop:
+            full_blackout = False
         ci_drop += 1
         # The climax drop holds its pattern a little longer than an ordinary
         # implosion (2.6s vs 1.9s) -- the biggest moment in the song earning
         # slightly more screen time before ambient resumes is part of making
         # it read as the climax rather than one implosion among six.
-        hold_end = drop + (2600 if is_climax_drop else 1900)
+        hold_end = drop + (2600 if is_climax_drop
+                           else (1500 if _is_first else 1900))
         # collapse inward, hold TRUE black (ambient gets clipped out of this
         # window below), then everything punches on the drop with varied,
         # pattern-rich content -- not just a flat flash -- and holds briefly
