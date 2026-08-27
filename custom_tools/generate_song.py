@@ -555,8 +555,22 @@ def envelope_palette(palette: ColorPalette, rms, rt, start_ms: int,
     if m.sum() < 4:
         return palette
     e = _np.asarray(rms)[m].astype(float)
-    # Smooth over ~0.6s so individual notes do not become flicker.
-    w = max(3, int(0.6 / max(float(rt[1] - rt[0]), 1e-6)))
+    # Smooth over a BAR, not 0.6s.
+    #
+    # This is where the ambient pulsing actually came from, after three other
+    # theories measured as inert (replacing brightness curves, slowing every
+    # shader and chase, clearing the rhythm layers outright -- all applied,
+    # all changing beat-periodicity by less than 0.01). The envelope follows
+    # the music's RMS, and the music is amplitude-modulated at the beat: at
+    # 117.5 BPM the beat is 0.51s, so a 0.6s window passes beat-rate
+    # modulation almost untouched and the "smooth" treatment was faithfully
+    # reproducing the pulse it was supposed to replace.
+    #
+    # A bar-length window keeps the passage's shape -- swells, builds, the
+    # arrival of an instrument -- while removing the beat from it, which is
+    # exactly the ask: "pulsing more like each bar or couple of bars."
+    _bar_s = 4.0 * 60.0 / max(SONG_TEMPO, 1.0)
+    w = max(3, int(_bar_s / max(float(rt[1] - rt[0]), 1e-6)))
     k = _np.ones(w) / w
     e = _np.convolve(e, k, mode="same")
     lo, hi = float(e.min()), float(e.max())
@@ -3172,9 +3186,19 @@ def main():
             # the motion itself keeps time instead of a brightness pulse doing
             # it. Applied to a minority of spans on the big canvases -- the
             # whole point is that it is a surprise.
+            # Always on a span that BEGINS at a structural moment, plus a
+            # share of the rest. "I think we can use it a bit more, it doesn't
+            # need to be only a surprise, it's a great focal point when
+            # there's a strong rhythm or when a drop happens or on section
+            # changes and such." Tying it to the moment makes it read as a
+            # reaction to the music rather than a random flourish.
+            _on_moment = any(abs(s_ms / 1000.0 - d) <= 0.35 for d in _drop_marks) or \
+                any(abs(s_ms / 1000.0 - sec.start_time) <= 0.35
+                    for sec in analysis.sections)
             if (target.get("large") and k.startswith("shader_")
-                    and random.Random(f"{SONG_NAME}|spdswing|{target['name']}|{s_ms}"
-                                      ).random() < 0.28):
+                    and (_on_moment
+                         or random.Random(f"{SONG_NAME}|spdswing|{target['name']}|{s_ms}"
+                                          ).random() < 0.40)):
                 _sec_beats = [b for b in beats if s_ms / 1000.0 <= b < e_ms / 1000.0]
                 _cuts = _sec_beats[::2][:12]
                 if len(_cuts) >= 3:
@@ -3276,13 +3300,33 @@ def main():
         # the SAME pattern resumes, which is the one thing a drop must not do.
         # Any mark in the run-up is pulled out and the drop time itself becomes
         # the mark, so the pattern the drop reveals is genuinely new.
-        if _drop_marks:
-            marks = [m for m in marks
-                     if not any(0.0 < d - m <= 4.0 for d in _drop_marks)]
-            for d in _drop_marks:
+        # SNAP TO THE STRUCTURAL MOMENT, don't just avoid it.
+        #
+        # "Harmony has the same 'shader changes at the wrong time' issue, it
+        # changes at 1:14 for example but the section change is at 1:17." And
+        # on Cruise: "the shader changes more dramatically a few seconds later
+        # after the drop, but that change would have been more effective right
+        # at the drop."
+        #
+        # Deleting marks in the run-up fixed the early case only, and only for
+        # drops. A change landing just AFTER the moment is the same failure
+        # mirrored, and section boundaries matter as much as drops -- they are
+        # where a viewer expects the look to turn over. So every mark within
+        # 4s either side of a structural moment is MOVED onto it: the change
+        # cannot happen early, cannot straggle in late, and the moment itself
+        # always gets one.
+        _moments = sorted(set(_drop_marks)
+                          | {sec.start_time for sec in analysis.sections})
+        if _moments:
+            snapped = []
+            for m in marks:
+                near = min(_moments, key=lambda d: abs(d - m))
+                snapped.append(near if abs(near - m) <= 4.0 else m)
+            for d in _moments:
                 if section.start_time + 0.5 < d < section.end_time - 0.5:
-                    marks.append(d)
-            marks = sorted(set(marks))
+                    snapped.append(d)
+            marks = sorted({round(x, 3) for x in snapped
+                            if section.start_time - 0.01 <= x <= section.end_time + 0.01})
         if marks and marks[-1] < section.end_time - 0.2:
             marks.append(section.end_time)
         return marks
@@ -6307,6 +6351,31 @@ def main():
         energy_rank = sorted(
             range(len(cutouts)),
             key=lambda i: -cutouts[i].get("drop_energy", 0)).index(ci_drop)
+        # DOUBLE DROPS: the band arrives in two stages. "It's a weird one
+        # because the kick/bass come in first and then a beat or two later the
+        # rest of the instruments hit and it's detecting that as the main drop
+        # but it's really the first one, or maybe we can treat it like a double
+        # drop, add a bunch on the first drop and a beat or two later when the
+        # other instruments hit add the rest."
+        #
+        # Measured at Harmony's 3:18: drums enter at 196.02s and bass at
+        # 196.93s, while the full-band energy step lands at 199.0-200.0s --
+        # seven beats later, and staging only the second is what made the
+        # moment feel late. The first stage now gets its own gesture on the
+        # linear props, so the house acknowledges the kick and bass arriving
+        # and still has the full display in reserve for the real hit.
+        _stage1 = None
+        for _vn in ("kick", "bass"):
+            _v = voices.get(_vn)
+            if _v is None:
+                continue
+            _c = [t_ for t_ in _v.onsets if drop / 1000.0 - 4.0 <= t_
+                  <= drop / 1000.0 - 0.8]
+            if _c:
+                _stage1 = min(_c) if _stage1 is None else min(_stage1, min(_c))
+        if _stage1 is not None and t is cast[0]:
+            log(_stage1, "double-drop",
+                f"first stage {drop / 1000.0 - _stage1:.1f}s before the main hit")
         full_blackout = is_climax_drop or energy_rank < max(1, len(cutouts) // 3)
         # SAVE SOMETHING FOR LATER. "Don't go 100% on the first moment in the
         # song, save some stuff for later drops and moments."
@@ -6393,6 +6462,17 @@ def main():
             # Gooey's 1:00 drop went from a peak of 175 to 89.7. A swell with a
             # 0.02s attack and a long decay is not a flash (it never switches
             # off), so it passes the guard and puts the brightness back.
+            if _stage1 is not None and (t["cat"] in ("single_line", "icicle")
+                                        or any(h in t["name"].lower()
+                                               for h in ("outline", "vertical",
+                                                         "horizontal", "c9"))):
+                # Stage one: the linear props answer the kick and bass, with a
+                # swell rather than a flash so it reads as an arrival and does
+                # not spend the impact the main hit needs.
+                _s1 = int(_stage1 * 1000)
+                add_target(t, L_SIG, "on_hit", _s1, _s1 + 1400, PALETTES["white"],
+                           extra={"T_TEXTCTRL_Fadein": "0.05",
+                                  "T_TEXTCTRL_Fadeout": "1.20"})
             if t.get("large") or prominence_of(t) >= 2:
                 # `on_hit` (a plain On at full level), not a Color Wash: the
                 # wash version only recovered the drop peak from 99 to 104
@@ -6857,9 +6937,14 @@ def main():
             if id(eff) in _ambient_ids or eff.layer not in (L_PULSE, L_SIG):
                 _kept.append(eff)
                 continue
-            if eff.end_time_ms - eff.start_time_ms > 400:
-                _kept.append(eff)
-                continue
+            # NO DURATION ESCAPE. The 400ms cutoff let the actual offenders
+            # through: measured on The Last Goodbye's intro -- 0.03 drum hits
+            # per second -- the beat-rate pulsing came from `Candy Canes` L3
+            # washes and L1 chases that were all LONGER than 400ms, so every
+            # one of them survived the clear. The rhythm layers have no
+            # business in a passage with no rhythm, at any length; movement
+            # lives on the BASE and MOTION layers, which are untouched here.
+            pass
             s_s = eff.start_time_ms / 1000.0
             if not any(a["t0"] <= s_s < a["t1"] for a in ambient_passages):
                 _kept.append(eff)
@@ -6906,11 +6991,140 @@ def main():
                 eff.palette = envelope_palette(base, _rms_all, _rt_all,
                                                eff.start_time_ms,
                                                eff.end_time_ms, depth=0.6)
+                # Protect it from the rebuild pass. Without this the clearing
+                # swapped a beat pulse for an envelope and the rebuild swapped
+                # it straight back -- which is why four separate fixes to the
+                # ambient pulsing all measured as inert while each was
+                # provably applied. The rebuild only skips _ambient_ids.
+                _ambient_ids.add(id(eff))
             _kept3.append(eff)
+        # SLOW EVERYTHING THAT MOVES, not just the holds this pass placed.
+        #
+        # The Last Goodbye's intro has 0.03 drum hits per second and still
+        # measured 13.5% of its brightness energy at the BEAT frequency. It
+        # was never the brightness curves: shader speed is tempo-scaled
+        # (400 * tempo/120), so the shader MOTION itself carries the beat, and
+        # chases carry it in their rotation count. Slowing only the shaders
+        # this pass places left every shader the section path had already put
+        # there running at song speed underneath.
+        # QUIET SECTIONS SIT BELOW LOUD ONES. Measured on Harmony, the
+        # ambient passages were running BRIGHTER than the choruses (70% lit
+        # against 61%), which is backwards and is why "the drops and peak
+        # climax moments don't seem as big -- they can't be brighter than the
+        # rest." Krists's target: "maybe 15-30% darker" rather than half.
+        #
+        # Applied as a ceiling on the brightness curve rather than by removing
+        # content, so the passage keeps its texture and movement and simply
+        # sits lower. Effects with no curve get a flat one at the same level.
+        # 0.78 was not nearly enough: it left Harmony's quiet passages still
+        # 14% BRIGHTER than its loud ones and Cruise exactly level. The target
+        # is quiet sitting 15-30% below loud, so the factor has to overcome
+        # the gap as well as create the margin.
+        _DIM = 0.50
+        _dimmed = 0
+        for eff in _kept3:
+            # OVERLAP, not start-inside: a hold that begins before the passage
+            # and runs through it lights the passage just as much, and those
+            # were escaping the dim entirely.
+            if not any(a["t0"] < eff.end_time_ms / 1000.0
+                       and a["t1"] > eff.start_time_ms / 1000.0
+                       for a in ambient_passages):
+                continue
+            pal = eff.palette
+            if pal is None:
+                continue
+            parts = list(pal.extra_parts or [])
+            vc = next((x for x in parts if x.startswith("C_VALUECURVE_Brightness=")),
+                      None)
+            if vc is not None:
+                m2 = re.search(r"Values=([0-9.:;]+)", vc)
+                if not m2:
+                    continue
+                pts = []
+                for seg in m2.group(1).split(";"):
+                    if ":" not in seg:
+                        continue
+                    t_, v_ = seg.split(":")
+                    pts.append(f"{float(t_):.3f}:{max(0.02, float(v_) * _DIM):.2f}")
+                parts = [x for x in parts if x is not vc] + [
+                    vc.split("Values=")[0] + "Values=" + ";".join(pts)]
+            else:
+                parts.append(
+                    "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                    f"Type=Flat|Min=0.00|Max=400.00|RV=TRUE|"
+                    f"Values=0.000:{VC_NOMINAL * _DIM:.2f};1.000:{VC_NOMINAL * _DIM:.2f}")
+            eff.palette = pal.model_copy(update={"extra_parts": parts})
+            _dimmed += 1
+        if _dimmed:
+            print(f"Ambient passages: dimmed {_dimmed} effects to "
+                  f"{_DIM * 100:.0f}% so drops can sit above them")
+
+        _slowed = 0
+        for eff in _kept:
+            if not any(a["t0"] <= eff.start_time_ms / 1000.0 < a["t1"]
+                       for a in ambient_passages):
+                continue
+            st = eff.settings
+            if "E_SLIDER_Shader_Speed" in st:
+                v = int(st["E_SLIDER_Shader_Speed"])
+                if v > 60:
+                    eff.settings = {**st,
+                                    "E_SLIDER_Shader_Speed": str(max(30, int(v * 0.30)))}
+                    _slowed += 1
+            elif "E_TEXTCTRL_Chase_Rotations" in st:
+                # A chase's rotation count is its speed. One rotation over a
+                # multi-bar span is a drift; four is a pulse.
+                eff.settings = {**st, "E_TEXTCTRL_Chase_Rotations": "0.5"}
+                _slowed += 1
+        if _slowed:
+            print(f"Ambient passages: slowed {_slowed} moving effects to a drift")
         _kept = _kept3
         effects = _kept
         print(f"Ambient passages: cleared {_cut} rhythmic hits from "
               f"{len(ambient_passages)} smooth passages")
+
+    # --- flood discipline -------------------------------------------------
+    # "Across songs we're using the floods too much and strobing or pulsing
+    # them too much again. They should really be used sparingly, for slow
+    # washes, or for lighting up the house when many other lights are dimmed
+    # for a quieter part for the contrast, or sometimes in a really high
+    # energy section they can do the top/bottom or left/right flashing on the
+    # beat but no faster than quarter notes."
+    #
+    # Enforced here rather than in the flood pass, for the same reason the
+    # no-strobe rule ended up here: several passes can put light on a flood
+    # and no single one of them can see the total. Three rules, in order --
+    # nothing faster than a quarter note, nothing at all in a quiet passage
+    # unless it is a slow wash (the contrast case, which wants a wash and not
+    # a flash), and a hard cap on how many flood hits a song may contain.
+    _floods = [n for n in {e.model_name for e in effects} if "flood" in n.lower()]
+    if _floods:
+        _beat_ms = 60000.0 / max(SONG_TEMPO, 1.0)
+        _amb_spans = [(a["t0"], a["t1"]) for a in ambient_passages]
+        _kept, _cut_fast, _cut_quiet = [], 0, 0
+        _last: dict[str, int] = {}
+        for eff in sorted(effects, key=lambda e: e.start_time_ms):
+            nm = eff.model_name
+            if "flood" not in nm.lower():
+                _kept.append(eff)
+                continue
+            dur = eff.end_time_ms - eff.start_time_ms
+            slow_wash = dur >= 1500 or float(
+                (eff.settings or {}).get("T_TEXTCTRL_Fadeout", 0) or 0) >= 1.0
+            in_quiet = any(a <= eff.start_time_ms / 1000.0 < b for a, b in _amb_spans)
+            if in_quiet and not slow_wash:
+                _cut_quiet += 1
+                continue
+            if not slow_wash and eff.start_time_ms - _last.get(nm, -10 ** 9) < _beat_ms:
+                _cut_fast += 1
+                continue
+            if not slow_wash:
+                _last[nm] = eff.start_time_ms
+            _kept.append(eff)
+        effects = _kept
+        if _cut_fast or _cut_quiet:
+            print(f"Floods: dropped {_cut_fast} faster than a quarter note, "
+                  f"{_cut_quiet} flashing in quiet passages")
 
     # --- flash-rate cap, per prop ----------------------------------------
     # "There are a few points where we flash/pulse the matrices too fast, and

@@ -66,6 +66,7 @@ def analyse(song: str) -> dict:
         m = (rt >= t0) & (rt < t1)
         return rms[m] if m.any() else np.array([0.0])
 
+    bar_s = 4.0 * 60.0 / max(float(a["beats"]["tempo"]), 1.0)
     rows = []
     for i, s in enumerate(a["sections"]):
         t0, t1 = s["start_time"], s["end_time"]
@@ -130,13 +131,49 @@ def analyse(song: str) -> dict:
         p["build"] = float(e[-q:].mean() / max(e[:q].mean(), 1e-9))
         p["drum_rate"] = sum(len(voices[v].in_window(t0, t1))
                              for v in ("kick", "snare") if v in voices) / max(p["dur"], 1e-6)
-        ev = sorted(t for v in ("kick", "bass", "chord")
-                    if v in voices for t in voices[v].in_window(t0, t1))
+        # WHAT IS THE RHYTHM OF THIS PASSAGE?
+        #
+        # "In TVOY in the intro I see the lights are hitting some of the piano
+        # chords but they're also following other rhythms and it's
+        # distracting... the piano chords really need to be front and centre."
+        #
+        # Where there are no drums, the chord instrument IS the rhythm and
+        # everything else is noise around it. Two corrections are needed:
+        #   * vocals bleed into the chord stem -- 21% of This Version of You's
+        #     chord onsets land within 150ms of a vocal onset -- so those are
+        #     dropped
+        #   * the chord voice still fires every 0.32s on that track, roughly
+        #     1.4 times per beat, which is not "one chord at a time". A piano
+        #     part moves on the scale of a bar, so the thinning is a bar wide
+        #     rather than 0.9s.
+        drumless = p["drum_rate"] < AMBIENT_DRUM_RATE
+        vt = list(voices["vocal"].in_window(t0, t1)) if "vocal" in voices else []
+
+        def _no_vocal(t):
+            return not any(abs(t - x) < 0.15 for x in vt)
+
+        if drumless and "chord" in voices:
+            ev = sorted(t for t in voices["chord"].in_window(t0, t1) if _no_vocal(t))
+            gap = max(1.2, bar_s)
+        else:
+            ev = sorted(t for v in ("kick", "bass", "chord")
+                        if v in voices for t in voices[v].in_window(t0, t1))
+            gap = 0.9
         sparse, last = [], -9.0
         for t in ev:
-            if t - last >= 0.9:
+            if t - last >= gap:
                 sparse.append(t)
                 last = t
+        # The rare drum/bass hits in a drumless passage are the big moments and
+        # must not be lost to the chord thinning -- they are added back.
+        if drumless:
+            for vn in ("kick", "bass"):
+                if vn not in voices:
+                    continue
+                for t in voices[vn].in_window(t0, t1):
+                    if all(abs(t - x) >= 0.6 for x in sparse):
+                        sparse.append(t)
+            sparse.sort()
         p["sparse"] = sparse
         seen = []
         for r in rows:
