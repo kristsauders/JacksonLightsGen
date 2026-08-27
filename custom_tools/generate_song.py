@@ -531,6 +531,61 @@ SHADER_PICKS = [
 ]
 
 
+def envelope_palette(palette: ColorPalette, rms, rt, start_ms: int,
+                     end_ms: int, depth: float = 1.0) -> ColorPalette:
+    """Copy of `palette` whose brightness follows the MUSIC'S OWN SHAPE over
+    this span, instead of following the beat.
+
+    In a drumless passage there is no beat to accent -- "they need to be more
+    smooth and flowy" -- but there is still a contour: the synth swells, the
+    pad thins out, the bass arrives. Sampling the section's measured RMS and
+    turning it into the brightness curve makes the whole house breathe with
+    that contour, which is a gesture a viewer reads as the music being
+    followed even though nothing is marking time.
+
+    Deliberately smoothed and normalised WITHIN the span: what matters is the
+    passage's own rise and fall, not where it sits against the rest of the
+    song, or a quiet intro would render as a flat dark line.
+    """
+    import numpy as _np
+    s_s, e_s = start_ms / 1000.0, end_ms / 1000.0
+    if e_s - s_s < 1.0:
+        return palette
+    m = (rt >= s_s) & (rt < e_s)
+    if m.sum() < 4:
+        return palette
+    e = _np.asarray(rms)[m].astype(float)
+    # Smooth over ~0.6s so individual notes do not become flicker.
+    w = max(3, int(0.6 / max(float(rt[1] - rt[0]), 1e-6)))
+    k = _np.ones(w) / w
+    e = _np.convolve(e, k, mode="same")
+    lo, hi = float(e.min()), float(e.max())
+    if hi - lo < 1e-9:
+        return palette
+    e = (e - lo) / (hi - lo)
+    n = min(VC_POINT_CAP - 2, 40)
+    idx = _np.linspace(0, len(e) - 1, n).astype(int)
+    pts = []
+    for j, i in enumerate(idx):
+        t = j / (n - 1)
+        # Map to the same scale beat_pulse_palette uses: VC_NOMINAL is 100%.
+        v = VC_NOMINAL * (1.0 - 0.55 * depth + 1.05 * depth * float(e[i]))
+        pts.append((t, max(0.02, min(0.5, v))))
+    clean = []
+    for t, v in pts:
+        if clean and t <= clean[-1][0] + 1e-4:
+            continue
+        clean.append((t, v))
+    if len(clean) < 3:
+        return palette
+    vc = ("C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+          "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values="
+          + ";".join(f"{t:.3f}:{v:.2f}" for t, v in clean))
+    return palette.model_copy(update={
+        "extra_parts": [x for x in (palette.extra_parts or [])
+                        if not x.startswith("C_VALUECURVE_Brightness=")] + [vc]})
+
+
 def fade_palette(palette: ColorPalette) -> ColorPalette:
     """Copy of `palette` with a HIT-then-SLOW-FADE brightness curve.
 
@@ -1029,6 +1084,11 @@ PALETTES.update(RED_PALETTES)
 
 # One family per song, chosen for that track's mood, plus two neighbours to
 # rotate through so a long song still evolves without leaving its identity.
+# Songs whose pulse mode is a judgement call rather than a measurement.
+PULSE_MODE_OVERRIDE: dict[str, str] = {
+    "Meridian": "groove",
+}
+
 SONG_PALETTE_FAMILY: dict[str, list[str]] = {
     # The 2026-08-16 batch: seven cinematic/atmospheric tracks (four ODESZA,
     # CloZee, Catching Flies, ROYA). Chosen by ear against each track's
@@ -4490,6 +4550,112 @@ def main():
             f"{section.label} #{inst} energy={e:.2f} -> {n_active}/{n_cast} targets lit "
             f"({n_active/n_cast*100:.0f}%), {n_feature} feature, palette={pal_name}")
 
+    # --- AMBIENT PASSAGES: sequence the SHAPE, not the beat ----------------
+    #
+    # "For the slower/quieter/intro/outro type sections we need a different
+    # approach that is more holistic and looks at how the entire section
+    # builds or develops... instead of just repetitive rhythm and placing
+    # voices on props, instead we identify the important moments and any slow
+    # key/synth/bass/kick rhythms that are often like a single hit or
+    # something happening only once every couple of bars."
+    #
+    # Everything else in this generator assumes a beat to hang things on. That
+    # is right for a chorus and wrong for a drumless intro, where it produces
+    # "lights pulsing and being very rhythmic when they need to be more smooth
+    # and flowy". So passages with no drum pulse get a separate vocabulary:
+    #
+    #   * one long hold per passage on the big canvases, its brightness curve
+    #     built from the passage's OWN measured energy, so the house follows
+    #     the music's contour instead of marking time (envelope_palette)
+    #   * a slow BLOOM on each sparse event -- the single bass notes and chord
+    #     changes that are the only rhythm such a passage has. Blooms, not
+    #     flashes: 0.3s in, over a second out.
+    #   * an ENTRANCE mark when a voice arrives, which is the most legible
+    #     moment a quiet passage owns.
+    #
+    # Note a passage can be LOUD and still belong here: This Version of You
+    # runs at 0.78-0.80 loudness with zero drums for 37 seconds at a stretch.
+    # Drumless is not the same as quiet, so the treatment scales with measured
+    # loudness rather than assuming darkness.
+    ambient_passages: list[dict] = []
+    try:
+        from ambient_sections import analyse as _amb_analyse
+        _amb = _amb_analyse(SONG_NAME)
+        ambient_passages = [p for p in _amb["passages"]
+                            if p["ambient"] and p["dur"] >= 8.0]
+    except Exception as _e:
+        print(f"  (ambient-passage analysis unavailable: {_e})")
+
+    n_amb = 0
+    _ambient_ids: set[int] = set()
+    if ambient_passages:
+        _rms = np.asarray(analysis.spectrum.rms_energy)
+        _rt = np.asarray(analysis.spectrum.rms_times)
+        amb_rng = random.Random(f"{SONG_NAME}|ambient")
+        big = [t for t in cast if t.get("large")]
+        movers = [t for t in cast if prominence_of(t) >= 2 and not t.get("large")]
+        for pi, ap in enumerate(ambient_passages):
+            t0, t1 = ap["t0"], ap["t1"]
+            si_at = next((i for i, sec in enumerate(analysis.sections)
+                          if sec.start_time <= t0 < sec.end_time), 0)
+            _sm = section_meta[si_at] if si_at < len(section_meta) else {}
+            pal = (_sm.get("palette") if isinstance(_sm, dict) else None) or PALETTES["ice"]
+            # Intensity follows the passage's measured loudness: a loud
+            # drumless synth passage should be big, a dark intro should not.
+            loud = float(ap.get("loud", 0.5))
+            # (a) the canvases hold ONE developing pattern for the whole
+            #     passage, breathing with the section's own energy curve.
+            key = amb_rng.choice([k for k in SHADER_KEYS
+                                  if is_palette_driven(k) and not is_centred(k)]
+                                 or SHADER_KEYS)
+            # EVERY recognisable prop carries the contour, not just the big
+            # canvases. Ten targets out of several hundred moved the measured
+            # correlation between display brightness and music energy by 0.01
+            # -- the shaped layer was sitting on an unshaped floor, exactly as
+            # the drop/fade envelope did before the same fix.
+            for seat, tgt in enumerate(big + movers):
+                _k = key if tgt.get("large") else "wash"
+                p_ = palette_variant(pal, seat) if is_palette_driven(_k) else pal
+                p_ = envelope_palette(p_, _rms, _rt, int(t0 * 1000), int(t1 * 1000),
+                                      depth=0.55 + 0.45 * loud)
+                _n0 = len(effects)
+                add_target(tgt, L_BASE, _k, int(t0 * 1000), int(t1 * 1000), p_)
+                for _e2 in effects[_n0:]:
+                    _ambient_ids.add(id(_e2))
+                n_amb += 1
+            # (b) a bloom on each sparse event, rotating around the house so
+            #     the passage travels instead of repeating in one place.
+            hold = int(min(2400, max(900, (t1 - t0) / max(len(ap["sparse"]), 1) * 900)))
+            for ei, et in enumerate(ap["sparse"]):
+                if not movers:
+                    break
+                tgt = movers[(ei * 3 + pi) % len(movers)]
+                _n0 = len(effects)
+                add_target(tgt, L_MOTION, "wash", int(et * 1000),
+                           int(et * 1000) + hold, pal,
+                           extra={"T_TEXTCTRL_Fadein": "0.30",
+                                  "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.75:.2f}"})
+                for _e2 in effects[_n0:]:
+                    _ambient_ids.add(id(_e2))
+                n_amb += 1
+            # (c) an entrance gets a wider reveal -- several props at once,
+            #     held long. This is the moment the passage is "about".
+            if ap.get("enters") and movers:
+                for j in range(min(4, len(movers))):
+                    tgt = movers[(pi * 5 + j) % len(movers)]
+                    _n0 = len(effects)
+                    add_target(tgt, L_MOTION, "wash", int(t0 * 1000),
+                               int(t0 * 1000) + 3200, pal,
+                               extra={"T_TEXTCTRL_Fadein": "0.80",
+                                      "T_TEXTCTRL_Fadeout": "2.20"})
+                    for _e2 in effects[_n0:]:
+                        _ambient_ids.add(id(_e2))
+                    n_amb += 1
+        print(f"Ambient passages: {len(ambient_passages)} treated as shape, not "
+              f"beat ({n_amb} placements; "
+              + ", ".join(f"{p['t0']:.0f}-{p['t1']:.0f}s" for p in ambient_passages[:5])
+              + ")")
+
     # --- DROP/FADE CYCLE HOLDS ---------------------------------------------
     # One shader per cycle on every big canvas, from the kick that starts the
     # drop to the kick that starts the next one. A dedicated pass rather than
@@ -4745,8 +4911,25 @@ def main():
         pulse_mode = "quarter"
     elif kick_v is not None and len(kick_v) >= 24:
         pulse_mode = "groove"          # kick (+ snare backbeat) drives it
+    elif voices.get("bass") is not None and len(voices["bass"]) >= 24:
+        # NO USABLE DRUMS IS NOT A REASON TO IMPOSE A GRID. Falling back to
+        # quarter here was backwards: This Version of You has EIGHT kick
+        # onsets and no detected snare at all, so it took the metronome
+        # branch -- the most rigid option in the generator -- on the least
+        # rhythmic track in the library. Where there are no drums the bass is
+        # the pulse, and following it is what "they don't really have a steady
+        # quarter kick and are more dynamic" asks for.
+        pulse_mode = "groove"
     else:
-        pulse_mode = "quarter"         # no usable kick -- fall back to the grid
+        pulse_mode = "quarter"         # nothing rhythmic at all -- last resort
+    # Per-song override. Meridian measures as a steady four-on-the-floor (93%
+    # kick coverage, evenly spaced, drums 0.580 of the mix) and Krists hears
+    # it the other way: "they don't really have a steady quarter kick and are
+    # more dynamic." The measurement is not wrong about the kick, it just
+    # cannot hear that the kick keeps stopping -- the song has 20s drumless
+    # stretches. Recorded as an explicit taste call rather than bent into the
+    # gate, which would have flipped Fara and 12 to 12 along with it.
+    pulse_mode = PULSE_MODE_OVERRIDE.get(SONG_NAME, pulse_mode)
 
     def pulse_times_in(t0: float, t1: float) -> list[float]:
         if pulse_mode == "quarter":
@@ -6412,6 +6595,52 @@ def main():
     # times, so it renders the same; correctness costs nothing here.
     TUNNEL_MIRROR_SRC = "Tunnel Matrix Real"
     TUNNEL_MIRROR_DST = "Tunnel"
+    # --- ambient passages: take the RHYTHM back out ------------------------
+    # Placing smooth gestures is only half of it. The beat anchor, gutter
+    # flashes, submodel stepping, leaping arches and ensemble flashes all run
+    # off their own gates and will happily keep flashing underneath -- which
+    # is the state Krists described: rhythmic when it should be flowing.
+    #
+    # Short hits on the rhythm layers come out; anything longer stays, because
+    # that is a gesture rather than a beat mark. Staged drops are exempt: a
+    # quiet passage often ENDS on one, and that moment is the payoff the whole
+    # passage was building toward.
+    if ambient_passages:
+        _drop_ms = [int(ev["drop_time"] * 1000) for ev in cutouts]
+        _kept, _cut = [], 0
+        for eff in effects:
+            if id(eff) in _ambient_ids or eff.layer not in (L_PULSE, L_SIG):
+                _kept.append(eff)
+                continue
+            if eff.end_time_ms - eff.start_time_ms > 400:
+                _kept.append(eff)
+                continue
+            s_s = eff.start_time_ms / 1000.0
+            if not any(a["t0"] <= s_s < a["t1"] for a in ambient_passages):
+                _kept.append(eff)
+                continue
+            if any(abs(eff.start_time_ms - d) <= 600 for d in _drop_ms):
+                _kept.append(eff)      # the drop this passage was building to
+                continue
+            _cut += 1
+        # Flat ambient fill on the BASE layer comes out too: it is a constant
+        # level under a passage whose whole point is that the level moves.
+        # Motion layers are left alone -- smooth is not the same as empty, and
+        # the movement is what keeps a long quiet passage alive.
+        _kept2 = []
+        for eff in _kept:
+            if (id(eff) not in _ambient_ids and eff.layer == L_BASE
+                    and eff.effect_name in ("Color Wash", "On", "Twinkle")
+                    and any(a["t0"] <= eff.start_time_ms / 1000.0 < a["t1"]
+                            for a in ambient_passages)):
+                _cut += 1
+                continue
+            _kept2.append(eff)
+        _kept = _kept2
+        effects = _kept
+        print(f"Ambient passages: cleared {_cut} rhythmic hits from "
+              f"{len(ambient_passages)} smooth passages")
+
     # --- flash-rate cap, per prop ----------------------------------------
     # "There are a few points where we flash/pulse the matrices too fast, and
     # it looks like strobing, where it's to 8th notes or something. There's
@@ -6512,7 +6741,12 @@ def main():
         # five successive attempts at shaping the intro fade measured between
         # 1.1x and 1.8x no matter what was changed upstream: the shape was
         # being written correctly and then overwritten here.
-        if id(eff) in _cycle_ids:
+        # Cycle holds carry a hit-and-decay envelope and ambient holds carry
+        # the section's own energy contour. Both are shapes, not pulses, and
+        # this pass would read their peak as a "depth" and replace them with a
+        # beat pulse -- the same way it silently destroyed the drop/fade
+        # envelope until that was exempted.
+        if id(eff) in _cycle_ids or id(eff) in _ambient_ids:
             continue
         pal = eff.palette
         if pal is None or not pal.extra_parts:
