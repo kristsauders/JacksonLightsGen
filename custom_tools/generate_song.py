@@ -3076,10 +3076,12 @@ def main():
     # placed, then used by the cohort-lock pass to pull any straggler onto the
     # same boundaries -- see the sync pass near the run-up dip.
     cohort_marks: set[int] = set()
+    n_spd_swing = 0
     # (canvas, cycle-start) pairs already given their one span -- see hold_spans.
     _cycle_claimed: set[tuple] = set()
 
     def hold_spans(target, layer, key, section, palette, seat, energy_level):
+        nonlocal n_spd_swing
         """Place a multi-bar HOLD as bar-aligned spans carrying a beat pulse.
 
         Every large canvas has to come through here, whatever ROLE it happened
@@ -3156,6 +3158,44 @@ def main():
             # Even on the feature layer, not every span: a deterministic 30%
             # are held flat so a canvas alternates between breathing and
             # running steady instead of pulsing continuously.
+            # SPEED SWING ON THE BEAT. "In Meridian at 0:10 when the drums
+            # come in the diagonal stripes go across the house really fast on
+            # the first beat and then suddenly on the next beat they go really
+            # slowly -- that's a fantastic effect! I wish it did that again at
+            # other points on the beat, fast movement, slow movement, fast,
+            # slow."
+            #
+            # That happened by accident, where two spans of the same shader at
+            # different speeds happened to abut on a beat. Made deliberate
+            # here: a span is cut on the beat grid and the same shader
+            # alternates between a fast and a slow variant across the cuts, so
+            # the motion itself keeps time instead of a brightness pulse doing
+            # it. Applied to a minority of spans on the big canvases -- the
+            # whole point is that it is a surprise.
+            if (target.get("large") and k.startswith("shader_")
+                    and random.Random(f"{SONG_NAME}|spdswing|{target['name']}|{s_ms}"
+                                      ).random() < 0.28):
+                _sec_beats = [b for b in beats if s_ms / 1000.0 <= b < e_ms / 1000.0]
+                _cuts = _sec_beats[::2][:12]
+                if len(_cuts) >= 3:
+                    _en, _base_set = EFFECTS[k]
+                    for _vi, _mult in ((0, 2.4), (1, 0.35)):
+                        _vk = f"{k}__spd{_vi}"
+                        if _vk not in EFFECTS:
+                            _st2 = dict(_base_set)
+                            _st2["E_SLIDER_Shader_Speed"] = str(max(15, int(
+                                int(_st2.get("E_SLIDER_Shader_Speed", 400)) * _mult)))
+                            EFFECTS[_vk] = (_en, _st2)
+                    _bounds = [s_ms / 1000.0] + _cuts[1:] + [e_ms / 1000.0]
+                    for _ci in range(len(_bounds) - 1):
+                        _a, _b2 = int(_bounds[_ci] * 1000), int(_bounds[_ci + 1] * 1000)
+                        if _b2 - _a < 200:
+                            continue
+                        add_target(target, layer, f"{k}__spd{_ci % 2}",
+                                   _a, _b2, base_pal)
+                    cohort_marks.update((s_ms, e_ms))
+                    n_spd_swing += 1
+                    continue
             _skip = (layer != L_MOTION
                      or random.Random(f"{SONG_NAME}|pulseskip|"
                                       f"{target['name']}|{s_ms}").random() < 0.30)
@@ -4658,6 +4698,19 @@ def main():
             key = amb_rng.choice([k for k in SHADER_KEYS
                                   if is_palette_driven(k) and not is_centred(k)]
                                  or SHADER_KEYS)
+            # ...and run it SLOWLY. "The ambient sections should swell more
+            # gently and slowly." A shader at song speed keeps putting motion
+            # at the beat rate even when nothing is pulsing, which is a large
+            # part of why these passages still read as rhythmic. Registered as
+            # a separate slowed key so the same shader elsewhere is unaffected.
+            _slow_key = key + "__ambslow"
+            if _slow_key not in EFFECTS:
+                _en, _sett = EFFECTS[key]
+                _sett = dict(_sett)
+                _sett["E_SLIDER_Shader_Speed"] = str(
+                    max(20, int(int(_sett.get("E_SLIDER_Shader_Speed", 400)) * 0.30)))
+                EFFECTS[_slow_key] = (_en, _sett)
+            key = _slow_key
             # EVERY recognisable prop carries the contour, not just the big
             # canvases. Ten targets out of several hundred moved the measured
             # correlation between display brightness and music energy by 0.01
@@ -4685,8 +4738,16 @@ def main():
             marks_a = [t0] + [c for c in _ch if t0 + 1.5 < c < t1 - 1.5] + [t1]
             for seat, tgt in enumerate(big + movers):
                 _k = key if tgt.get("large") else "wash"
-                for mi in range(len(marks_a) - 1):
-                    a_ms, b_ms = int(marks_a[mi] * 1000), int(marks_a[mi + 1] * 1000)
+                # THE HARMONY GOES ON PROPS, NOT THE CANVASES. "Showing
+                # piano/bass/synth rhythms should be on props not on the whole
+                # matrix canvases across the whole house." Splitting the big
+                # canvases per chord turned the whole facade over on every
+                # chord, which is far too much surface for a piano note. The
+                # canvases hold ONE slow envelope across the passage and the
+                # props carry the chord changes.
+                _marks = [t0, t1] if tgt.get("large") else marks_a
+                for mi in range(len(_marks) - 1):
+                    a_ms, b_ms = int(_marks[mi] * 1000), int(_marks[mi + 1] * 1000)
                     # Each chord takes the next colour of the family, so the
                     # change is visible as a change and not just a re-trigger.
                     p_ = (palette_variant(pal, seat + mi) if is_palette_driven(_k)
@@ -5493,6 +5554,7 @@ def main():
           f"({n_beat_skipped} overlaps suppressed) "
           f"(kick coverage {kick_coverage * 100:.0f}%)")
     print(f"Beat-locked brightness: {n_shader_pulse} wash spans pulse on the beat")
+    print(f"Speed swing: {n_spd_swing} shader spans alternate fast/slow on the beat")
 
     # --- 2-pre-b. Whole-house shader as an underlying texture bed ----------
     # "We can also experiment with using shaders across the whole house,
@@ -6143,6 +6205,53 @@ def main():
         _keep = [ev for ev in _drops if ev not in _demoted]
         _rest = [ev for ev in _rest if ev not in _demoted]
         _drops = _keep
+    # SNAP EVERY DROP TO THE HIT IT IS ABOUT.
+    #
+    # "The first drop at 1:23 is off the beat, the lights come in too early...
+    # At 2:46 there's also a drop and the lights seem to hit too early... And
+    # at 4:48 it's close but still a bit off."
+    #
+    # The energy detector reports where the level STARTS RISING, which is
+    # before the downbeat that actually lands -- measured on The Last Goodbye,
+    # 1.51s early at 1:23, 0.56s at 2:46 and 0.07s at 4:48, in exactly the
+    # order Krists ranked them. A drop is a single moment and the lights have
+    # to be on it, so each candidate is pulled forward to the strongest drum
+    # onset just after it and then quantised to the beat grid.
+    def _snap_drop(dt: float) -> float:
+        # The FIRST strong hit in the window, not the strongest one. Taking
+        # the strongest pushed The Last Goodbye's 4:48 drop out to 289.63s --
+        # a louder bar a second and a half after the drums actually entered at
+        # 288.07 -- which is the same error as being early, mirrored. A drop
+        # is where the thing STARTS.
+        cands = []
+        for vn in ("kick", "snare"):
+            v = voices.get(vn)
+            if v is None:
+                continue
+            cands += [(float(t_), float(s_)) for t_, s_ in zip(v.onsets, v.strengths)
+                      # Never earlier than the detection: the energy detector
+                      # reports the rise, so the true hit is always at or
+                      # after it, and allowing a backward snap put 1:23 at
+                      # 83.51 when the drums enter at 83.80.
+                      if dt <= t_ <= dt + 2.00]
+        if not cands:
+            return dt
+        _mx = max(s_ for _t, s_ in cands)
+        best_t = min(t_ for t_, s_ in cands if s_ >= _mx * 0.55)
+        nb = min(beats, key=lambda b: abs(b - best_t)) if beats else best_t
+        # Trust the beat grid only when it agrees with the hit closely; a
+        # drum entry that lands slightly ahead of the grid is still the drop.
+        return nb if abs(nb - best_t) <= 0.12 else best_t
+
+    _snapped = 0
+    for _ev in _drops + _rest:
+        _new = _snap_drop(float(_ev["drop_time"]))
+        if abs(_new - _ev["drop_time"]) > 0.05:
+            _snapped += 1
+            _ev["drop_time"] = _new
+    if _snapped:
+        print(f"  snapped {_snapped} drop times onto the drum hit they mark")
+
     cutouts = (_drops + _rest)[:6]
     cutouts.sort(key=lambda ev: ev["cutout_start"])
     blackout_windows = []
@@ -6740,6 +6849,8 @@ def main():
     # quiet passage often ENDS on one, and that moment is the payoff the whole
     # passage was building toward.
     if ambient_passages:
+        _rms_all = np.asarray(analysis.spectrum.rms_energy)
+        _rt_all = np.asarray(analysis.spectrum.rms_times)
         _drop_ms = [int(ev["drop_time"] * 1000) for ev in cutouts]
         _kept, _cut = [], 0
         for eff in effects:
@@ -6770,7 +6881,33 @@ def main():
                 _cut += 1
                 continue
             _kept2.append(eff)
-        _kept = _kept2
+        # NO BEAT-RATE PULSING IN A PASSAGE WITH NO BEAT. "Since there's no
+        # drums it's odd to pulse on quarter notes or half notes, I think
+        # pulsing more like each bar or couple of bars would be better...
+        # The ambient sections should swell more gently and slowly."
+        #
+        # The holds placed by the ordinary section path carry a beat-locked
+        # brightness curve, and clearing short hits does not touch them -- so
+        # the passage kept pulsing on the quarter note underneath the smooth
+        # treatment. Any such curve inside an ambient passage is replaced with
+        # the passage's own energy contour over that effect's span, which
+        # moves on the scale of bars because the music does.
+        _kept3 = []
+        for eff in _kept:
+            pal = eff.palette
+            if (id(eff) not in _ambient_ids and pal is not None and pal.extra_parts
+                    and any(x.startswith("C_VALUECURVE_Brightness=")
+                            for x in pal.extra_parts)
+                    and any(a["t0"] <= eff.start_time_ms / 1000.0 < a["t1"]
+                            for a in ambient_passages)):
+                base = pal.model_copy(update={"extra_parts": [
+                    x for x in pal.extra_parts
+                    if not x.startswith("C_VALUECURVE_Brightness=")]})
+                eff.palette = envelope_palette(base, _rms_all, _rt_all,
+                                               eff.start_time_ms,
+                                               eff.end_time_ms, depth=0.6)
+            _kept3.append(eff)
+        _kept = _kept3
         effects = _kept
         print(f"Ambient passages: cleared {_cut} rhythmic hits from "
               f"{len(ambient_passages)} smooth passages")
