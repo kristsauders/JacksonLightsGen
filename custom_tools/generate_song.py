@@ -569,7 +569,12 @@ def envelope_palette(palette: ColorPalette, rms, rt, start_ms: int,
     for j, i in enumerate(idx):
         t = j / (n - 1)
         # Map to the same scale beat_pulse_palette uses: VC_NOMINAL is 100%.
-        v = VC_NOMINAL * (1.0 - 0.55 * depth + 1.05 * depth * float(e[i]))
+        # Deliberately wide. "We can also exaggerate the brightness connection
+        # to the music loudness/intensity a bit, so the brightness grows during
+        # an ambient section that's building." At depth 1 this runs 25% to
+        # 185% of nominal across the passage, so a section that builds visibly
+        # grows rather than merely brightening a little.
+        v = VC_NOMINAL * (1.0 - 0.75 * depth + 1.60 * depth * float(e[i]))
         pts.append((t, max(0.02, min(0.5, v))))
     clean = []
     for t, v in pts:
@@ -2714,6 +2719,12 @@ def main():
     positions = {m["name"]: m for m in layout["models"]}
     analysis = SongAnalysis.model_validate_json((GEN_DIR / "analysis.json").read_text())
     cues = json.loads((GEN_DIR / "cues.json").read_text())
+    # Every moment a drop could land on, used by change_marks() to keep a
+    # pattern change from happening just BEFORE one.
+    _drop_marks = sorted({round(float(ev["drop_time"]), 2)
+                          for k in ("predrop_cutouts", "energy_drops",
+                                    "instrument_dropouts")
+                          for ev in cues.get(k, []) if ev.get("drop_time")})
 
     cast = build_cast(show_config, positions)
     covered = sum(t["n"] for t in cast)
@@ -2744,7 +2755,18 @@ def main():
         #
         # Substituted, not dropped: the moment still lands, as a burst that
         # travels across the prop rather than a slab of colour switching on.
-        if key in FLAT_KEYS and target_name in FLASH_SPLIT:
+        # A SWELL IS NOT A FLASH. What makes a big prop unwatchable is coming
+        # on and going off; a sharp attack followed by a long decay is the
+        # "gently pulse brightness" gesture Krists likes, just bigger. Without
+        # this escape the no-flash guard also strips the drops of their punch
+        # -- measured on Gooey, the 1:00 drop peaked at 175 before the guard
+        # and 89.7 after, because the big canvases' hit was being converted to
+        # a travelling pattern. Anything with a real fade-out is allowed
+        # through at full brightness.
+        _fade_out = float((extra or {}).get("T_TEXTCTRL_Fadeout", 0) or 0)
+        if key in FLAT_KEYS and _fade_out >= 0.8:
+            pass
+        elif key in FLAT_KEYS and target_name in FLASH_SPLIT:
             # A GROUP holding a big prop: flash its other members instead of
             # the group. Substituting a shaped effect is not enough here --
             # a Shockwave across a yard-wide group still sweeps the Mega Tree
@@ -2755,7 +2777,7 @@ def main():
             for _m in FLASH_SPLIT[target_name]:
                 add(_m, layer, key, start_ms, end_ms, palette, extra)
             return
-        if key in FLAT_KEYS and target_name in NO_FLAT_PROPS:
+        elif key in FLAT_KEYS and target_name in NO_FLAT_PROPS:
             key = ("chase_mid_out" if target_name in CONE_SHAPED
                    else "shockwave")
         name, settings = EFFECTS[key]
@@ -3202,6 +3224,25 @@ def main():
             marks = harmonic
         else:
             marks = sec_db[::bars_per_change]
+        # A DROP MUST LOOK DIFFERENT FROM WHAT CAME RIGHT BEFORE IT.
+        #
+        # "I notice we often switch to a new shader and color scheme before
+        # the drop, and the drop itself is just the lights going off and then
+        # back on with the same thing they showed before. A drop needs to look
+        # different from what came right before."
+        #
+        # Bar marks and drops are independent grids, so a change lands a few
+        # seconds early about as often as not -- and then the blackout hits and
+        # the SAME pattern resumes, which is the one thing a drop must not do.
+        # Any mark in the run-up is pulled out and the drop time itself becomes
+        # the mark, so the pattern the drop reveals is genuinely new.
+        if _drop_marks:
+            marks = [m for m in marks
+                     if not any(0.0 < d - m <= 4.0 for d in _drop_marks)]
+            for d in _drop_marks:
+                if section.start_time + 0.5 < d < section.end_time - 0.5:
+                    marks.append(d)
+            marks = sorted(set(marks))
         if marks and marks[-1] < section.end_time - 0.2:
             marks.append(section.end_time)
         return marks
@@ -4594,6 +4635,15 @@ def main():
         amb_rng = random.Random(f"{SONG_NAME}|ambient")
         big = [t for t in cast if t.get("large")]
         movers = [t for t in cast if prominence_of(t) >= 2 and not t.get("large")]
+        # Every linear prop -- outlines, verticals, horizontals, gutters. These
+        # are what make a whole-house hit read as one gesture: thin, bright,
+        # and spread right across the facade.
+        amb_lines = [t for t in cast
+                     if t["cat"] in ("single_line", "icicle")
+                     or any(h in t["name"].lower()
+                            for h in ("outline", "vertical", "horizontal",
+                                      "c9", "gutter"))]
+        n_big_hits = 0
         for pi, ap in enumerate(ambient_passages):
             t0, t1 = ap["t0"], ap["t1"]
             si_at = next((i for i, sec in enumerate(analysis.sections)
@@ -4613,31 +4663,99 @@ def main():
             # correlation between display brightness and music energy by 0.01
             # -- the shaped layer was sitting on an unshaped floor, exactly as
             # the drop/fade envelope did before the same fix.
+            # SHOW THE HARMONY AT SCALE. "In TVOY there is a slow piano part
+            # with one chord at a time and I want to show that on some large
+            # scale because it's the main focus point. In Meridian there is
+            # also a synth part that's relatively slow."
+            #
+            # The chord voice IS that part. Splitting the passage's hold at
+            # chord changes gives every chord its own colour across the big
+            # canvases, so the harmony is what the house is doing rather than
+            # something buried under a texture. Thinned to 2.5s so a busy
+            # moment cannot turn this into flicker, and it falls back to one
+            # unbroken hold when a passage has no chord movement to show.
+            _ch = []
+            _cv = voices.get("chord")
+            if _cv is not None:
+                _last = -9.0
+                for _t in _cv.in_window(t0, t1):
+                    if _t - _last >= 2.5:
+                        _ch.append(_t)
+                        _last = _t
+            marks_a = [t0] + [c for c in _ch if t0 + 1.5 < c < t1 - 1.5] + [t1]
             for seat, tgt in enumerate(big + movers):
                 _k = key if tgt.get("large") else "wash"
-                p_ = palette_variant(pal, seat) if is_palette_driven(_k) else pal
-                p_ = envelope_palette(p_, _rms, _rt, int(t0 * 1000), int(t1 * 1000),
-                                      depth=0.55 + 0.45 * loud)
-                _n0 = len(effects)
-                add_target(tgt, L_BASE, _k, int(t0 * 1000), int(t1 * 1000), p_)
-                for _e2 in effects[_n0:]:
-                    _ambient_ids.add(id(_e2))
-                n_amb += 1
-            # (b) a bloom on each sparse event, rotating around the house so
-            #     the passage travels instead of repeating in one place.
+                for mi in range(len(marks_a) - 1):
+                    a_ms, b_ms = int(marks_a[mi] * 1000), int(marks_a[mi + 1] * 1000)
+                    # Each chord takes the next colour of the family, so the
+                    # change is visible as a change and not just a re-trigger.
+                    p_ = (palette_variant(pal, seat + mi) if is_palette_driven(_k)
+                          else pal)
+                    p_ = envelope_palette(p_, _rms, _rt, a_ms, b_ms,
+                                          depth=0.70 + 0.50 * loud)
+                    _n0 = len(effects)
+                    add_target(tgt, L_BASE, _k, a_ms, b_ms, p_)
+                    for _e2 in effects[_n0:]:
+                        _ambient_ids.add(id(_e2))
+                    n_amb += 1
+            # (b) THE SINGLE HITS ARE THE DRAMA, so they get the whole house.
+            #
+            # "When there is a single kick or single bass hit we need to make
+            # those dramatic, not just a gentle bloom on some props, we need
+            # something big like all outlines and horizontals and verticals do
+            # a big bright pulse, like a sudden hit and fade. Or maybe a big
+            # shockwave across the whole house... The ambient sections in the
+            # songs I choose are usually not just calm or drumless, they are
+            # dramatic and the important moments need to really show."
+            #
+            # The strongest events in the passage get a full-house gesture:
+            # every outline, vertical and horizontal hit at once with a sharp
+            # attack and a long decay, and a shockwave travelling across the
+            # big canvases underneath. The rest keep the quieter bloom, so the
+            # big ones stay big by comparison -- if every hit were huge, none
+            # of them would read as a moment.
+            _st = {t: 0.0 for t in ap["sparse"]}
+            for _vn in ("kick", "bass", "chord"):
+                _v = voices.get(_vn)
+                if _v is None:
+                    continue
+                for _t, _s2 in zip(_v.onsets, _v.strengths):
+                    for _e3 in ap["sparse"]:
+                        if abs(_t - _e3) < 0.45:
+                            _st[_e3] = max(_st[_e3], float(_s2))
+            _vals = sorted(_st.values())
+            _big_cut = _vals[int(len(_vals) * 0.6)] if _vals else 0.0
             hold = int(min(2400, max(900, (t1 - t0) / max(len(ap["sparse"]), 1) * 900)))
             for ei, et in enumerate(ap["sparse"]):
-                if not movers:
-                    break
-                tgt = movers[(ei * 3 + pi) % len(movers)]
-                _n0 = len(effects)
-                add_target(tgt, L_MOTION, "wash", int(et * 1000),
-                           int(et * 1000) + hold, pal,
-                           extra={"T_TEXTCTRL_Fadein": "0.30",
-                                  "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.75:.2f}"})
-                for _e2 in effects[_n0:]:
-                    _ambient_ids.add(id(_e2))
-                n_amb += 1
+                ms = int(et * 1000)
+                is_big = _st.get(et, 0.0) >= _big_cut and _big_cut > 0
+                if is_big and amb_lines:
+                    # sudden hit, long fade -- across every linear prop at once
+                    for tgt in amb_lines:
+                        _n0 = len(effects)
+                        add_target(tgt, L_MOTION, "wash", ms, ms + 2600, pal,
+                                   extra={"T_TEXTCTRL_Fadein": "0.05",
+                                          "T_TEXTCTRL_Fadeout": "2.10"})
+                        for _e2 in effects[_n0:]:
+                            _ambient_ids.add(id(_e2))
+                        n_amb += 1
+                    # ...and a shockwave crossing the big canvases under it
+                    for tgt in big:
+                        _n0 = len(effects)
+                        add_target(tgt, L_MOTION, "shockwave", ms, ms + 1800, pal)
+                        for _e2 in effects[_n0:]:
+                            _ambient_ids.add(id(_e2))
+                        n_amb += 1
+                    n_big_hits += 1
+                elif movers:
+                    tgt = movers[(ei * 3 + pi) % len(movers)]
+                    _n0 = len(effects)
+                    add_target(tgt, L_MOTION, "wash", ms, ms + hold, pal,
+                               extra={"T_TEXTCTRL_Fadein": "0.30",
+                                      "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.75:.2f}"})
+                    for _e2 in effects[_n0:]:
+                        _ambient_ids.add(id(_e2))
+                    n_amb += 1
             # (c) an entrance gets a wider reveal -- several props at once,
             #     held long. This is the moment the passage is "about".
             if ap.get("enters") and movers:
@@ -4652,7 +4770,8 @@ def main():
                         _ambient_ids.add(id(_e2))
                     n_amb += 1
         print(f"Ambient passages: {len(ambient_passages)} treated as shape, not "
-              f"beat ({n_amb} placements; "
+              f"beat ({n_amb} placements, {n_big_hits} full-house hits on "
+              f"{len(amb_lines)} linear props; "
               + ", ".join(f"{p['t0']:.0f}-{p['t1']:.0f}s" for p in ambient_passages[:5])
               + ")")
 
@@ -6159,6 +6278,21 @@ def main():
             add_target(t, L_SIG, "on_hit", drop, hand, PALETTES["white"])
             drop_pal = PALETTES["climax"] if is_climax_drop else PALETTES["gold"]
             add_target(t, L_SIG, drop_hit_key(t, is_climax_drop), hand, hold_end, drop_pal)
+            # THE DROP HAS TO BE BRIGHT. "It just seemed like the drops lit up
+            # brighter before somehow" -- they did: the no-flash guard was
+            # converting the big canvases' hit into a travelling pattern, and
+            # Gooey's 1:00 drop went from a peak of 175 to 89.7. A swell with a
+            # 0.02s attack and a long decay is not a flash (it never switches
+            # off), so it passes the guard and puts the brightness back.
+            if t.get("large") or prominence_of(t) >= 2:
+                # `on_hit` (a plain On at full level), not a Color Wash: the
+                # wash version only recovered the drop peak from 99 to 104
+                # against 191 before the guard, because a wash is not full
+                # brightness. The long fade-out is what keeps it a swell.
+                add_target(t, L_SIG, "on_hit", drop, drop + 1600,
+                           PALETTES["white"],
+                           extra={"T_TEXTCTRL_Fadein": "0.02",
+                                  "T_TEXTCTRL_Fadeout": "1.40"})
         log(ev["cutout_start"], "implosion",
             f"collapse to true black, hold, full-display hit + pattern on drop @{ev['drop_time']:.1f}s")
     print(f"Pre-drop implosions: {len(cutouts)} staged (of "
