@@ -36,7 +36,12 @@ from fseq_reader import read_fseq  # noqa: E402
 SHOW = Path("/Volumes/XLIGHTS/XLights 2026")
 XLIGHTS = Path("/Applications/xLights.app/Contents/MacOS/xLights")
 TARGET = -0.22          # middle of Krists's 15-30% band
-FLOOR, CEIL = 0.25, 1.0
+# The factor may exceed 1.0 -- i.e. BRIGHTEN. Half the library turned out to
+# have quiet passages naturally far below the target (Ojai measured -57.8%
+# with no dimming at all, Aperture -36.4% at 0.99), and a mechanism that can
+# only darken has no way to bring those up. Krists's band is a target, not a
+# ceiling: too dark misses it as surely as too bright.
+FLOOR, CEIL = 0.25, 1.9
 
 
 def measure(song: str, seq: str) -> float | None:

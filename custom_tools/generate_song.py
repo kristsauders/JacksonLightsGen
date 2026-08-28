@@ -531,6 +531,27 @@ SHADER_PICKS = [
 ]
 
 
+# BIG-IMPACT GESTURES, so one effect stops being the answer to everything.
+# "I also think we overuse the shockwave effect a bit, maybe we can find other
+# effects that give a similar impact, swipe across or something else." What
+# these share is that they cross the whole prop quickly from a single origin;
+# they differ in the shape of the crossing, which is what keeps repeated big
+# moments from looking like the same moment.
+IMPACT_KEYS = ["shockwave", "ripple_explode", "sweep_right", "sweep_left",
+               "sweep_up", "sweep_down", "chase_mid_out", "pinwheel"]
+
+
+def impact_key(seed: str, wide: bool = True) -> str:
+    """One of the big-impact gestures, chosen deterministically from `seed`.
+
+    Deterministic so a given moment always renders the same way, and so
+    successive moments in a song walk the pool instead of re-rolling onto the
+    same effect."""
+    pool = IMPACT_KEYS if wide else [k for k in IMPACT_KEYS
+                                     if not k.startswith("sweep")]
+    return pool[hash(seed) % len(pool)]
+
+
 def envelope_palette(palette: ColorPalette, rms, rt, start_ms: int,
                      end_ms: int, depth: float = 1.0) -> ColorPalette:
     """Copy of `palette` whose brightness follows the MUSIC'S OWN SHAPE over
@@ -3199,9 +3220,27 @@ def main():
                     and (_on_moment
                          or random.Random(f"{SONG_NAME}|spdswing|{target['name']}|{s_ms}"
                                           ).random() < 0.40)):
+                # REPETITION MAKES IT INTENTIONAL. "I think it needs a little
+                # bit more repetition to look intentional, sometimes it does
+                # it once or twice and then does a different thing and it can
+                # almost look like it's just glitching... So maybe if it's
+                # quarter or a regular beat we stick with the same change
+                # effect for a few bars, or if it's on a new section or drop
+                # then we only do it once and in some impactful way."
+                #
+                # Two shapes, chosen by where the span begins. On a section or
+                # drop it swings ONCE, big, as part of the moment. Anywhere
+                # else it needs at least four alternations -- two bars of
+                # fast/slow -- or it is not placed at all, because a couple of
+                # swings in isolation reads as a fault rather than a figure.
                 _sec_beats = [b for b in beats if s_ms / 1000.0 <= b < e_ms / 1000.0]
-                _cuts = _sec_beats[::2][:12]
-                if len(_cuts) >= 3:
+                if _on_moment:
+                    _cuts = _sec_beats[:2]
+                else:
+                    _cuts = _sec_beats[::2][:12]
+                    if len(_cuts) < 5:
+                        _cuts = []
+                if len(_cuts) >= 2:
                     _en, _base_set = EFFECTS[k]
                     for _vi, _mult in ((0, 2.4), (1, 0.35)):
                         _vk = f"{k}__spd{_vi}"
@@ -4767,6 +4806,16 @@ def main():
                      or any(h in t["name"].lower()
                             for h in ("outline", "vertical", "horizontal",
                                       "c9", "gutter"))]
+        # The families the chord hits cycle through, in a fixed order so the
+        # sequence repeats and reads as deliberate.
+        def _fam(*words):
+            return [t for t in cast
+                    if any(w in t["name"].lower() for w in words)][:8]
+
+        amb_cycle = [f for f in (_fam("vertical"), _fam("horizontal"),
+                                 _fam("outline"), _fam("c9", "gutter"),
+                                 _fam("arch"))
+                     if len(f) >= 2]
         n_big_hits = 0
         for pi, ap in enumerate(ambient_passages):
             t0, t1 = ap["t0"], ap["t1"]
@@ -4892,22 +4941,42 @@ def main():
                             _ambient_ids.add(id(_e2))
                         n_amb += 1
                     # ...and a shockwave crossing the big canvases under it
+                    _ik = impact_key(f"{SONG_NAME}|amb|{pi}|{ei}")
                     for tgt in big:
                         _n0 = len(effects)
-                        add_target(tgt, L_MOTION, "shockwave", ms, ms + 1800, pal)
+                        add_target(tgt, L_MOTION, _ik, ms, ms + 1800, pal)
                         for _e2 in effects[_n0:]:
                             _ambient_ids.add(id(_e2))
                         n_amb += 1
                     n_big_hits += 1
-                elif movers:
-                    tgt = movers[(ei * 3 + pi) % len(movers)]
-                    _n0 = len(effects)
-                    add_target(tgt, L_MOTION, "wash", ms, ms + hold, pal,
-                               extra={"T_TEXTCTRL_Fadein": "0.30",
-                                      "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.75:.2f}"})
-                    for _e2 in effects[_n0:]:
-                        _ambient_ids.add(id(_e2))
-                    n_amb += 1
+                elif amb_cycle:
+                    # A REPEATING PATTERN, not a different prop every time.
+                    #
+                    # "The main piano chord progression, looks like you're
+                    # getting the rhythm but every hit does something totally
+                    # different... it should be more cohesive, like every
+                    # chord hit should do the same thing but maybe just with a
+                    # different color or shape. Like hit all the verticals
+                    # then the horizontals, then verticals again, then all the
+                    # outlines."
+                    #
+                    # Rotating one prop per hit out of dozens is unfollowable:
+                    # nothing recurs, so there is no pattern for the eye to
+                    # latch onto. The hits now cycle through a short, fixed
+                    # sequence of prop FAMILIES, every member of the family
+                    # lighting together, with the colour advancing each time.
+                    # Same gesture, different colour -- which is exactly what
+                    # makes a slow chord progression readable.
+                    fam = amb_cycle[ei % len(amb_cycle)]
+                    fam_pal = palette_variant(pal, ei) if len(pal.colors) > 1 else pal
+                    for tgt in fam:
+                        _n0 = len(effects)
+                        add_target(tgt, L_MOTION, "wash", ms, ms + hold, fam_pal,
+                                   extra={"T_TEXTCTRL_Fadein": "0.25",
+                                          "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.8:.2f}"})
+                        for _e2 in effects[_n0:]:
+                            _ambient_ids.add(id(_e2))
+                        n_amb += 1
             # (c) an entrance gets a wider reveal -- several props at once,
             #     held long. This is the moment the passage is "about".
             if ap.get("enters") and movers:
@@ -6347,6 +6416,8 @@ def main():
     cutouts.sort(key=lambda ev: ev["cutout_start"])
     blackout_windows = []
     ci_drop = 0
+    # per-prop implosion / one house-wide collapse / a directional wipe
+    _collapse_modes = ("prop", "house", "wipe")
     for ev in cutouts:
         c0, c1 = int(ev["cutout_start"] * 1000), int(ev["cutout_end"] * 1000)
         drop = int(ev["drop_time"] * 1000)
@@ -6450,6 +6521,10 @@ def main():
         # before ambient resumes, so "almost no lights" to "almost all
         # lights, doing something" actually reads as the big contrast it's
         # meant to be.
+        _cmode_now = _collapse_modes[ci_drop % len(_collapse_modes)]
+        if _cmode_now == "house" and HOUSE_GROUP:
+            add(HOUSE_GROUP, L_SIG, "ripple_implode", c0, dark_start,
+                PALETTES["white"], SPAN)
         for t in cast:
             # Large canvases kept showing up in red-flash reports even after
             # the buffer-style fix and the feature-pool narrowing -- this
@@ -6461,8 +6536,30 @@ def main():
             # count). Use Shockwave -- proven safe everywhere, every round --
             # for ALL large targets' collapse phase, not just tree-shaped
             # ones.
-            collapse_key = "shockwave" if t.get("large") else "ripple_implode"
-            add_target(t, L_SIG, collapse_key, c0, dark_start, PALETTES["white"])
+            # VARY THE COLLAPSE. "When we drop out all the lights before a
+            # big drop, we always use the same effect that's the reverse
+            # shockwave on every prop individually, we should sometimes use it
+            # across the whole house as a group and sometimes use other
+            # effects to drop out so it's not always the same."
+            #
+            # Three modes, rotating by drop index so a song's implosions do
+            # not all look alike: the per-prop collapse (what it always did),
+            # a collapse run across the WHOLE HOUSE as one spanning canvas so
+            # the light retreats across the facade rather than inside each
+            # prop, and a directional wipe. Chosen per drop, not per prop, so
+            # every prop in one implosion still agrees.
+            _cmode = _collapse_modes[ci_drop % len(_collapse_modes)]
+            if _cmode == "house" and HOUSE_GROUP:
+                pass          # placed once, outside this per-prop loop
+            else:
+                if _cmode == "wipe":
+                    collapse_key = ("sweep_left" if (ci_drop // len(_collapse_modes)) % 2
+                                    else "sweep_right")
+                else:
+                    collapse_key = ("shockwave" if t.get("large")
+                                    else "ripple_implode")
+                add_target(t, L_SIG, collapse_key, c0, dark_start,
+                           PALETTES["white"])
             if full_blackout:
                 add_target(t, L_SIG, "off", dark_start, drop, PALETTES["white"])
             elif t["cat"] in ("single_line", "icicle") or "/" in t["name"]:
