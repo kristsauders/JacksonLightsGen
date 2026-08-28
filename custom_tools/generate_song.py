@@ -3062,6 +3062,35 @@ def main():
     stem_dir = SHOW_PATH / "stems" / SONG_NAME
     drum_fills = detect_drum_fills(stem_dir, beats, beat_ms)
     voices = detect_instrument_voices(stem_dir, beats, beat_ms, drum_fills)
+
+    # INSTRUMENT ENTRANCES ARE STRUCTURAL MOMENTS.
+    #
+    # "In WhatsApp Shakespeare in the intro, the shaders come in right before
+    # the main drum beat starts, which takes away from the impact of that drum
+    # entrance -- the shader should start right when the section changes and
+    # the drums start."
+    #
+    # Measured there, the drums arrive at 8.68s while the nearest section
+    # boundary is 6.48s: the detector simply does not mark the entrance, so
+    # nothing had anything to align to and the shader landed 1.18s early. A
+    # voice arriving after several seconds of absence is exactly the kind of
+    # moment a viewer reads as a change, whether or not the boundary detector
+    # agrees, so those times join the grid that change_marks snaps to.
+    _entrances: list[float] = []
+    for _vn in ("kick", "snare", "bass", "chord"):
+        _v = voices.get(_vn)
+        if _v is None or len(_v) < 4:
+            continue
+        _prev = None
+        for _t in sorted(_v.onsets):
+            if _prev is None or _t - _prev >= 4.0:
+                _entrances.append(float(_t))
+            _prev = _t
+    _entrances = sorted(set(round(x, 2) for x in _entrances))
+    if _entrances:
+        print(f"Instrument entrances: {len(_entrances)} treated as structural "
+              f"({', '.join(f'{x:.1f}' for x in _entrances[:6])}"
+              f"{'...' if len(_entrances) > 6 else ''})")
     if DISABLED_VOICES:
         _dropped = [v for v in voices if v in DISABLED_VOICES]
         voices = {k: v for k, v in voices.items() if k not in DISABLED_VOICES}
@@ -3172,6 +3201,24 @@ def main():
                 k = SHADER_SWAY[key][j % 2]
             else:
                 k = key if j % 2 == 0 else REVERSE.get(key, key)
+            # A DROP GETS A DIFFERENT SHADER, not the same one restarted.
+            #
+            # "The main last drop in World Is Mine, the shader changes before
+            # the drop, then it drops out and comes back for the drop and it's
+            # less impactful because it's the same thing we just saw a few
+            # seconds ago."
+            #
+            # Measured there: a change at 213.60s (a section start) put Liquid
+            # Chrome on the canvases, and the span beginning at the 218.87s
+            # drop was Liquid Chrome again. Snapping a span boundary onto the
+            # drop is not enough -- the boundary has to bring something new
+            # through it, or the blackout resolves to the picture that was
+            # already there.
+            if any(abs(marks[j] - d) <= 0.35 for d in _drop_marks):
+                _alt = [q for q in (PALETTE_DRIVEN_SHADERS or SHADER_KEYS)
+                        if q != k and not is_centred(q)]
+                if _alt:
+                    k = _alt[hash(f"{SONG_NAME}|dropshader|{s_ms}") % len(_alt)]
             depth = 0.5 + 0.5 * min(1.0, energy_level / 0.7)
             if not k.startswith("shader_"):
                 depth *= 0.6
@@ -3354,8 +3401,18 @@ def main():
         # 4s either side of a structural moment is MOVED onto it: the change
         # cannot happen early, cannot straggle in late, and the moment itself
         # always gets one.
-        _moments = sorted(set(_drop_marks)
-                          | {sec.start_time for sec in analysis.sections})
+        # Where a section boundary and an audible entrance disagree, the
+        # ENTRANCE wins. The boundary is inferred by a self-similarity
+        # detector; the entrance is a measured event in the audio. On
+        # WhatsApp Shakespeare the detector put a boundary at 6.48s while the
+        # drums actually arrive at 8.68s, and snapping to the nearest moment
+        # sent the shader to 6.48 -- further from the drums than where it
+        # started. A boundary within 3s of an entrance is dropped in its
+        # favour so there is only one moment there to snap to.
+        _ent = set(_entrances)
+        _secs_m = {sec.start_time for sec in analysis.sections
+                   if not any(abs(sec.start_time - e) <= 3.0 for e in _ent)}
+        _moments = sorted(set(_drop_marks) | _ent | _secs_m)
         if _moments:
             snapped = []
             for m in marks:
@@ -5660,6 +5717,7 @@ def main():
     # take over never fired. This is explicit instead of emergent: in flash
     # sections, the long gutter runs flash on the pulse, full stop.
     n_gutter = 0
+    # (the beat anchor's contrast is measured after staging -- see below)
     # C9 GUTTER RUNS ONLY. `spread_x >= 40` also caught the window/matrix
     # HORIZONTALS, so they picked up beat flashes on top of their slow sway --
     # "the horizontals at the top and bottom of each matrix don't seem to do
@@ -5690,8 +5748,20 @@ def main():
         for gi, tgt in enumerate(gutter_props):
             for hi, ht in enumerate(hits):
                 # Alternate halves of the bar between gutters so two long runs
-                # answer each other rather than firing as one slab.
-                if (hi + gi) % 2:
+                # answer each other rather than firing as one slab -- EXCEPT in
+                # the loudest sections, where they fire together.
+                #
+                # The beat lift on The WhatsApp Shakespeare fell from 1.352x to
+                # 1.113x in its RHYTHMIC sections (not its quiet ones) as the
+                # matrix pulsing was dialled back, the pulse skip added and big
+                # props stopped flashing -- all things Krists asked for, and all
+                # of which take brightness off the beat. "It could use more
+                # impact for the main beat, I think we lost a bit of that."
+                #
+                # Rather than undo any of that, the beat goes where flashing is
+                # still welcome: the long linear runs, hitting as one when the
+                # section is loud enough to carry it.
+                if section.energy_level < 0.60 and (hi + gi) % 2:
                     continue
                 if not beat_free(tgt, ht):
                     continue
@@ -7095,6 +7165,22 @@ def main():
                 continue
             if any(abs(eff.start_time_ms - d) <= 600 for d in _drop_ms):
                 _kept.append(eff)      # the drop this passage was building to
+                continue
+            # KEEP THE DOWNBEATS. Clearing every rhythm hit took the groove
+            # out of songs that still have one in their quiet passages:
+            # measured on The WhatsApp Shakespeare, whole-song beat lift went
+            # 1.332x (v35) to 1.008x the moment the ambient treatment landed,
+            # and only recovered to 1.09 after the classification fix. Its
+            # ambient passages carry 0.20-0.86 drum hits a second -- sparse,
+            # but not nothing.
+            #
+            # One hit per BAR survives, which is the rate Krists asked these
+            # passages to move at anyway ("pulsing more like each bar or
+            # couple of bars"), so the song keeps a pulse without the passage
+            # turning rhythmic again.
+            if downbeats and any(abs(eff.start_time_ms / 1000.0 - d) <= 0.08
+                                 for d in downbeats):
+                _kept.append(eff)
                 continue
             _cut += 1
         # Flat ambient fill on the BASE layer comes out too: it is a constant
