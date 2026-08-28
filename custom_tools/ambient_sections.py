@@ -168,8 +168,34 @@ def analyse(song: str) -> dict:
             return not any(abs(t - x) < 0.15 for x in vt)
 
         if drumless and "chord" in voices:
-            ev = sorted(t for t in voices["chord"].in_window(t0, t1) if _no_vocal(t))
-            gap = max(1.2, bar_s)
+            # The vocal veto was throwing out real chords. Krists's first piano
+            # chord (19.2s in This Version of You) lands exactly where the
+            # singer enters, which is completely normal -- a vocal arriving ON
+            # the chord is not evidence that the chord is imaginary. So the
+            # veto now only applies to WEAK onsets, where vocal bleed really is
+            # the likely explanation; a chord at or above the passage's median
+            # strength stands on its own regardless of the vocal.
+            _cv = voices["chord"]
+            _st = {t: v for t, v in zip(_cv.onsets, _cv.strengths)}
+            _win = _cv.in_window(t0, t1)
+            _med = (sorted(_st.get(t, 0.0) for t in _win)[len(_win) // 2]
+                    if _win else 0.0)
+            # Below the passage median the "chords" are pad and reverb bleed
+            # rather than played notes: in This Version of You the chords
+            # Krists counted score 1.0-2.7 (the first, at 19.2s, is the
+            # strongest of the whole intro at 2.66) while the bleed sits flat
+            # at 0.81-0.89, so the median lands in a real gap in the
+            # distribution instead of at a level someone picked. This also
+            # subsumes the vocal veto -- a chord loud enough to clear the
+            # median stands on its own even with the singer on top of it.
+            ev = sorted(t for t in _win if _st.get(t, 0.0) >= _med)
+            # A bar was far too coarse. "The chords have groups of 3 or 4
+            # chords about 1 per second" -- thinning at 1.86s threw away half
+            # of them, so the lights hit some chords and ignored others, which
+            # is most of why the rhythm read as arbitrary. Measured against
+            # Krists's own count (19, 26, 27, 28, 30, 36, 37, 38), a bar-wide
+            # gap kept only 26.4, 27.3, 28.8, 36.0 and 38.5.
+            gap = 0.8
         else:
             ev = sorted(t for v in ("kick", "bass", "chord")
                         if v in voices for t in voices[v].in_window(t0, t1))

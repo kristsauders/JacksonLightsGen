@@ -68,7 +68,21 @@ def _peek_tempo(default: float = 120.0) -> float:
 
 SONG_TEMPO = _peek_tempo()
 MP3_PATH = SHOW_PATH / f"{SONG_NAME}.mp3"
-OUT_NAME = f"{SONG_NAME} (v8).xsq"
+# Auto-increment rather than a hardcoded default: the default sat at "(v8)"
+# for months because every run passed --out, so the one run that forgot
+# silently overwrote a v8 that was eight versions old. The next free number
+# is always safe and always the newest.
+def _next_version() -> int:
+    import re as _re
+    n = 0
+    for _f in SHOW_PATH.glob(f"{SONG_NAME} (v*).xsq"):
+        _m = _re.search(r"\(v(\d+)\)\.xsq$", _f.name)
+        if _m:
+            n = max(n, int(_m.group(1)))
+    return n + 1
+
+
+OUT_NAME = f"{SONG_NAME} (v{_next_version()}).xsq"
 for i, a in enumerate(sys.argv):
     if a == "--out" and i + 1 < len(sys.argv):
         OUT_NAME = sys.argv[i + 1]
@@ -911,6 +925,96 @@ def palette_variant(pal: ColorPalette, n: int) -> ColorPalette:
         return pal
     k = n % len(cols)
     return pal.model_copy(update={"colors": cols[k:] + cols[:k]})
+
+
+# xLights VALUE CURVE FORMAT -- READ BEFORE EDITING ANY BRIGHTNESS CURVE.
+#
+# `Type=Flat` takes its level from `P1`, NOT from `Values=`. A curve written as
+# `Type=Flat|...|Values=0.00:0.16;1.00:0.16` has no P1, so xLights reads the
+# level as zero and THE EFFECT RENDERS COMPLETELY BLACK. It does not warn, and
+# the .xsq looks perfectly correct.
+#
+# Every brightness curve in this generator was written that way. Measured in
+# isolation on Corner Verticals: the same Color Wash renders mean 58.8 with no
+# curve and 0.0 with a Flat+Values curve at ANY level. So every effect carrying
+# an envelope, a dim, a hush or an accent -- thousands per song -- was rendering
+# as nothing, which is why round after round of changes measured inert in the
+# .fseq while looking right in the .xsq, and why Krists kept reporting that new
+# versions "didn't improve much".
+#
+# Working forms, both verified against the renderer:
+#     Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=<t>:<v>;...   (v: 0.25 = 100%)
+#     Type=Flat|Min=0.00|Max=400.00|P1=<percent>|RV=TRUE           (P1: 100 = 100%)
+# Use Custom. It is what the time-varying curves already use, so there is one
+# format in the file rather than two.
+def accent_bright(pal: ColorPalette, level: float = 0.38) -> ColorPalette:
+    """Lift a palette above the ambient background level.
+
+    "Even though we're keeping the energy lower, the piano chords need a
+    bright contrasting color." Ambient backgrounds sit near 0.09-0.15 on the
+    brightness curve (VC_NOMINAL 0.25 == 100%), so a chord placed at nominal
+    barely separated from them. This puts the chord itself around 150%, which
+    is what makes it read as an event rather than as more background.
+    """
+    return pal.model_copy(update={"extra_parts": list(pal.extra_parts or []) + [
+        "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+        f"Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=0.00:{level:.2f};1.00:{level:.2f}"]})
+
+
+def contrast_palette(pal: ColorPalette, n: int) -> ColorPalette:
+    """A bright accent palette deliberately far in hue from `pal`.
+
+    "Since we're using a faint gray and blue for most of the background, we
+    should use something like an orange for all the outlines... or using them
+    all but changing color on the beat."
+
+    palette_variant rotates WITHIN a family, so a chord hit in a grey/blue
+    section came out grey/blue -- present in the data, invisible on the house.
+    A chord is the foreground event of an ambient passage and has to read
+    against the background, so this picks a hue at least ~100 degrees away
+    from the section's dominant colour and advances through the candidates as
+    `n` increases, giving "changing color on the beat" for free. Greyscale
+    sections have no hue to avoid, so they get the warm end by default, which
+    is the orange Krists asked for.
+    """
+    import colorsys
+
+    def _hue(hexs: str) -> tuple[float, float]:
+        hexs = hexs.lstrip("#")
+        r, g, b = (int(hexs[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+        h, _l, sat = colorsys.rgb_to_hls(r, g, b)
+        return h, sat
+
+    # Warm-first, so the default accent against this show's cool backgrounds
+    # is the orange that was asked for.
+    ring = [
+        ("#FF6A00", "#FFA033", "#FFD9A0"),   # orange
+        ("#FFC400", "#FFE066", "#FFF4C2"),   # amber
+        ("#FF2D6F", "#FF7AA8", "#FFD0E0"),   # magenta
+        ("#7CFF3D", "#B6FF8A", "#E4FFD0"),   # lime
+        # The cool half exists so a WARM section still has somewhere to go.
+        # Without these, an ember/gold section filtered out every candidate
+        # and fell back to the whole ring, handing an orange section an
+        # orange "contrast" -- i.e. no contrast at all.
+        ("#00E5FF", "#7DF3FF", "#D6FBFF"),   # cyan
+        ("#2E6BFF", "#7FA5FF", "#D5E2FF"),   # azure
+    ]
+    # Judge against EVERY colour in the palette, not just the first. A palette
+    # that leads with white but carries a blue was being treated as having no
+    # hue at all, so the accent picked cyan -- blue on blue, which is not a
+    # contrast. Greyscale sections fall back to the warm half deliberately:
+    # this show's ambient background is "a faint gray and blue", so warm is
+    # the direction that reads against it.
+    hues = [_hue(c) for c in pal.colors]
+    lit = [h for h, sat in hues if sat >= 0.15]
+    if not lit:
+        cands = ring[:4]                     # warm half
+    else:
+        cands = [c for c in ring
+                 if all(min(abs(_hue(c[0])[0] - bh),
+                            1.0 - abs(_hue(c[0])[0] - bh)) >= 0.28 for bh in lit)] \
+            or ring[:4]
+    return ColorPalette(colors=list(cands[n % len(cands)]), active_colors=[1, 2, 3])
 
 
 def register_shader_sway() -> dict[str, tuple[str, str]]:
@@ -2749,6 +2853,26 @@ def assign_voices_to_props(voices: dict, cast: list[dict],
 
 
 def main():
+
+    def _probe(_lbl):
+        """Which pass ate my effect? PROBE=30.0,36.0 python generate_song.py ...
+
+        This class of bug -- an effect placed correctly and then quietly
+        removed or moved by a later pass -- has come up often enough that
+        guessing is a waste of time. Counting the same moment after every
+        major pass localises it in one run.
+        """
+        import os
+        _env = os.environ.get("PROBE")
+        if not _env:
+            return
+        for _t in [float(x) for x in _env.split(",") if x.strip()
+                   and x.strip()[0].isdigit()]:
+            _n = sum(1 for _e in effects
+                     if abs(_e.start_time_ms / 1000.0 - _t) < 0.35
+                     and any(h in _e.model_name.lower()
+                             for h in ("vertical", "horizontal", "c9", "outline")))
+            print(f"    PROBE {_lbl:28s} t={_t}: {_n}")
     show_config = load_show_config(SHOW_PATH)
     layout = json.loads((SHOW_PATH / ".generation" / "layout.json").read_text())
     positions = {m["name"]: m for m in layout["models"]}
@@ -2953,6 +3077,30 @@ def main():
         # so it overrides the SPAN injection above.
         if target.get("per_model") and target["kind"] == "group" \
                 and not target.get("synthetic"):
+            extra = {**(extra or {}), **PERMODEL}
+        # "Default" ON A GROUP IS A TRAP.
+        #
+        # For a group, xLights' Default buffer is one canvas in which each
+        # MEMBER MODEL is a single cell. A Color Wash across nine vertical
+        # strips therefore paints nine pixels, not nine strips. Measured on
+        # This Version of You: at 27.5s, with a chord wash on Corner
+        # Verticals, eight of the nine members were pure black and the ninth
+        # had a single lit pixel -- while an `On` effect (which carries no
+        # buffer style at all) lit all nine to 241 at 47.5s.
+        #
+        # This is why so many changes have measured inert in the render while
+        # looking right in the .xsq: the effects were placed, and rendered
+        # into almost no pixels. Every recipe defaulting to "Default" -- wash,
+        # shockwave and the rest -- was affected on every group target.
+        # The style has to be read from the RECIPE as well as from `extra` --
+        # most effects carry "Default" in their own settings dict and never
+        # mention it in `extra`, so a check against `extra` alone silently
+        # matched nothing.
+        _eff_style = (extra or {}).get(
+            "B_CHOICE_BufferStyle",
+            EFFECTS.get(key, ("", {}))[1].get("B_CHOICE_BufferStyle"))
+        if (target["kind"] == "group" and not target.get("synthetic")
+                and _eff_style == "Default"):
             extra = {**(extra or {}), **PERMODEL}
         # Cone/tunnel props need their strings stacked for a built-in 2D
         # effect to render as the real pattern rather than as lines. Shaders
@@ -5013,13 +5161,45 @@ def main():
         # The families the chord hits cycle through, in a fixed order so the
         # sequence repeats and reads as deliberate.
         def _fam(*words):
+            # No cap. Capping at eight meant a chord that landed on a small
+            # family lit three props while its neighbour lit twenty-five, so
+            # the progression pulsed in size for no musical reason. "Using
+            # them all but changing color on the beat" -- every member of the
+            # family goes, and the colour is what distinguishes the hits.
             return [t for t in cast
-                    if any(w in t["name"].lower() for w in words)][:8]
+                    if any(w in t["name"].lower() for w in words)]
 
-        amb_cycle = [f for f in (_fam("vertical"), _fam("horizontal"),
-                                 _fam("outline"), _fam("c9", "gutter"),
-                                 _fam("arch"))
-                     if len(f) >= 2]
+        # Families under a quarter of the largest are folded into the next
+        # one rather than used alone. Measured on This Version of You the
+        # families ran 25, 17, 7 and 3 props, so consecutive chords lit wildly
+        # different amounts of house and the progression appeared to swell and
+        # shrink at random. Every chord should light a comparable group; the
+        # COLOUR is what distinguishes them.
+        _raw = [f for f in (_fam("vertical"), _fam("horizontal"),
+                            _fam("outline"), _fam("c9", "gutter"),
+                            _fam("arch"))
+                if len(f) >= 2]
+        # Balance by the number of PROPS a family actually lights, not by the
+        # number of cast entries in it. Measured on This Version of You the
+        # entry counts were 5/2/4 -- near enough even -- while the props they
+        # expanded to were 17/7/3, so the merge never fired and consecutive
+        # chords still lit 17 props then 3.
+        def _famsize(f):
+            return sum(len(_xgroups.get(t["name"], []) or [1]) for t in f)
+
+        amb_cycle = []
+        if _raw:
+            _floor = max(_famsize(f) for f in _raw) * 0.4
+            for _f in _raw:
+                if _famsize(_f) < _floor and amb_cycle:
+                    _seen = {t["name"] for t in amb_cycle[-1]}
+                    amb_cycle[-1] = amb_cycle[-1] + [t for t in _f
+                                                     if t["name"] not in _seen]
+                else:
+                    amb_cycle.append(_f)
+        print("  ambient chord families (props lit): raw "
+              + "/".join(str(_famsize(f)) for f in _raw)
+              + " -> merged " + "/".join(str(_famsize(f)) for f in amb_cycle))
         n_big_hits = 0
         for pi, ap in enumerate(ambient_passages):
             t0, t1 = ap["t0"], ap["t1"]
@@ -5168,12 +5348,20 @@ def main():
                 ms = int(et * 1000)
                 is_big = _st.get(et, 0.0) >= _big_cut and _big_cut > 0
                 if is_big and amb_lines:
+                    # The linear props carry the CHORD, so they take the bright
+                    # accent; the canvases underneath stay in the section
+                    # palette so there is still a background for it to read
+                    # against. "The final 4 chords are not really visible,
+                    # there's just a faint blue glow on the outlines but it
+                    # needs to show the chords in a contrasting color."
+                    hit_pal = accent_bright(contrast_palette(pal, ei), 0.44)
+                    _acc = {"X_AmbientAccent": "1"}
                     # sudden hit, long fade -- across every linear prop at once
                     for tgt in amb_lines:
                         _n0 = len(effects)
-                        add_target(tgt, L_MOTION, "wash", ms, ms + 2600, pal,
+                        add_target(tgt, L_MOTION, "wash", ms, ms + 2600, hit_pal,
                                    extra={"T_TEXTCTRL_Fadein": "0.05",
-                                          "T_TEXTCTRL_Fadeout": "2.10"})
+                                          "T_TEXTCTRL_Fadeout": "2.10", **_acc})
                         tag_ambient(effects[_n0:])
                         n_amb += 1
                     # ...and a shockwave crossing the big canvases under it
@@ -5213,12 +5401,19 @@ def main():
                     # Same gesture, different colour -- which is exactly what
                     # makes a slow chord progression readable.
                     fam = amb_cycle[ei % len(amb_cycle)]
-                    fam_pal = palette_variant(pal, ei) if len(pal.colors) > 1 else pal
+                    # Contrast, not a variation. palette_variant kept the hit
+                    # inside the section family, so in a grey/blue passage the
+                    # chords were grey/blue on top of grey/blue and simply did
+                    # not show. The accent hue advances per hit, which is the
+                    # "changing color on the beat" half of what was asked for;
+                    # amb_cycle rotating the prop family is the other half.
+                    fam_pal = accent_bright(contrast_palette(pal, ei))
                     for tgt in fam:
                         _n0 = len(effects)
                         add_target(tgt, L_MOTION, "wash", ms, ms + hold, fam_pal,
                                    extra={"T_TEXTCTRL_Fadein": "0.25",
-                                          "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.8:.2f}"})
+                                          "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.8:.2f}",
+                                          "X_AmbientAccent": "1"})
                         tag_ambient(effects[_n0:])
                         n_amb += 1
             # (c) an entrance gets a wider reveal -- several props at once,
@@ -5233,6 +5428,7 @@ def main():
                                       "T_TEXTCTRL_Fadeout": "2.20"})
                     tag_ambient(effects[_n0:])
                     n_amb += 1
+        _probe("after ambient pass")
         print(f"Ambient passages: {len(ambient_passages)} treated as shape, not "
               f"beat ({n_amb} placements, {n_big_hits} full-house hits on "
               f"{len(amb_lines)} linear props; "
@@ -5316,7 +5512,7 @@ def main():
             _k0, _k1 = int(drop_cycles[0][0] * 1000), int(drop_cycles[-1][1] * 1000)
             _dim = PALETTES["ice"].model_copy(update={"extra_parts": [
                 "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
-                "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.00:0.09;1.00:0.09"]})
+                "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=0.00:0.09;1.00:0.09"]})
             for tgt in keepers:
                 _n0 = len(effects)
                 add_target(tgt, L_BASE, "wash", _k0, _k1, _dim)
@@ -7052,6 +7248,16 @@ def main():
 
         n_snapped = 0
         for eff in effects:
+            # Ambient chord hits are placed ON a chord and must stay there.
+            # The cohort grid was pulling 22 of the 25 props lit by the 36.0s
+            # chord onto its own boundaries, which is exactly the complaint
+            # that the chords were "messy and not on the beat of the piano
+            # chords" -- the hits were not missing, they had been dragged off
+            # the note. The grid exists to align long canvas holds with each
+            # other, and a 2.6s chord wash is not one of those.
+            if (is_ambient_eff(eff)
+                    and eff.end_time_ms - eff.start_time_ms <= 6000):
+                continue
             if eff.layer not in (L_BASE, L_MOTION):
                 continue
             if eff.end_time_ms - eff.start_time_ms < 1200:
@@ -7067,6 +7273,7 @@ def main():
                 continue
             eff.start_time_ms, eff.end_time_ms = a, b
             n_snapped += 1
+        _probe("Cohort lock:")
         print(f"Cohort lock: {n_snapped} big-canvas holds pulled onto the "
               f"shared grid ({len(grid)} boundaries)")
 
@@ -7135,6 +7342,7 @@ def main():
                     continue
             kept.append(eff)
         effects = kept
+    _probe("Run-up dips:")
     print(f"Run-up dips: {len(dip_windows)} section approaches, "
           f"{n_dipped} ambient effects thinned")
 
@@ -7575,6 +7783,15 @@ def main():
                        and a["t1"] > eff.start_time_ms / 1000.0
                        for a in ambient_passages):
                 continue
+            # The chord accents ARE the foreground of an ambient passage --
+            # the event the passage is built around. Dimming them along with
+            # the background defeated the entire point: the accent was written
+            # at 152% and arrived at the pixels at 64%, which is why the
+            # chords still read as "a faint glow" after being given a bright
+            # contrasting colour. The background around them still dims, so
+            # they gain contrast from this rather than losing it.
+            if eff.settings.get("X_AmbientAccent") == "1":
+                continue
             pal = eff.palette
             if pal is None:
                 continue
@@ -7609,11 +7826,12 @@ def main():
             else:
                 parts.append(
                     "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
-                    f"Type=Flat|Min=0.00|Max=400.00|RV=TRUE|"
+                    f"Type=Custom|Min=0.00|Max=400.00|RV=TRUE|"
                     f"Values=0.000:{VC_NOMINAL * _f:.2f};1.000:{VC_NOMINAL * _f:.2f}")
             eff.palette = pal.model_copy(update={"extra_parts": parts})
             _dimmed += 1
         if _dimmed:
+            _probe("Ambient passages: dimmed")
             print(f"Ambient passages: dimmed {_dimmed} effects to "
                   f"{_DIM * 100:.0f}% so drops can sit above them")
 
@@ -7635,9 +7853,11 @@ def main():
                 eff.settings = {**st, "E_TEXTCTRL_Chase_Rotations": "0.5"}
                 _slowed += 1
         if _slowed:
+            _probe("Ambient passages: slowed")
             print(f"Ambient passages: slowed {_slowed} moving effects to a drift")
         _kept = _kept3
         effects = _kept
+        _probe("Ambient passages: cleared")
         print(f"Ambient passages: cleared {_cut} rhythmic hits from "
               f"{len(ambient_passages)} smooth passages")
 
@@ -7694,7 +7914,7 @@ def main():
         effects = _kept
         _dim_tail = PALETTES["ice"].model_copy(update={"extra_parts": [
             "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
-            "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.11;1.000:0.11"]})
+            "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.11;1.000:0.11"]})
         _n_tail = 0
         for t in cast:
             if t["name"] in _keepers:
@@ -7724,11 +7944,19 @@ def main():
             # fades out." Every chord before it stays on the outlines and
             # grows a little; the last one brings the whole house in and then
             # fades to the end of the song.
-            _grow = 0.5 + 0.5 * (_ci / max(len(_thin) - 1, 1))
-            _pal_t = PALETTES["ice"].model_copy(update={"extra_parts": [
-                "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
-                f"Type=Flat|Min=0.00|Max=400.00|RV=TRUE|"
-                f"Values=0.000:{VC_NOMINAL * _grow:.2f};1.000:{VC_NOMINAL * _grow:.2f}"]})
+            # "The final 4 chords are not really visible, there's just a faint
+            # blue glow on the outlines but it needs to show the chords in a
+            # contrasting color." They were ice blue at 50-100% of nominal,
+            # sitting on top of a blue/grey tail -- present but unreadable.
+            # Now each closing chord takes the accent hue, advancing per chord,
+            # and starts ABOVE nominal so it is unmistakably an event.
+            _grow = 1.1 + 0.5 * (_ci / max(len(_thin) - 1, 1))
+            _tail_sec = next((sm.get("palette") for sm, sec
+                              in zip(section_meta, analysis.sections)
+                              if sec.start_time <= _c < sec.end_time
+                              and isinstance(sm, dict)), None) or PALETTES["ice"]
+            _pal_t = accent_bright(contrast_palette(_tail_sec, _ci),
+                                   VC_NOMINAL * _grow)
             for t in cast:
                 _in = t["name"] in _keepers
                 if _is_final:
@@ -7738,8 +7966,12 @@ def main():
                     continue
                 _end = (int(_dur_s * 1000) if _is_final
                         else int(_c * 1000) + 2200)
+                # On the last chord the whole house opens out in white, but
+                # the outlines keep the accent so the CHORD itself is still
+                # legible inside the swell rather than washed away by it.
                 add_target(t, L_MOTION, "wash", int(_c * 1000), _end,
-                           PALETTES["white"] if _is_final else _pal_t,
+                           (_pal_t if _in else PALETTES["white"])
+                           if _is_final else _pal_t,
                            extra={"T_TEXTCTRL_Fadein": "0.20",
                                   "T_TEXTCTRL_Fadeout":
                                   f"{max(2.5, (_end / 1000.0 - _c) * 0.85):.1f}"
@@ -7747,6 +7979,7 @@ def main():
         if _thin:
             print(f"Final dropout: {len(_thin)} closing chords still answered "
                   f"by the outlines")
+        _probe("Final dropout: cleared")
         print(f"Final dropout: cleared {_cut} effects after "
               f"{final_dropout:.1f}s, {_n_tail} outlines held dim to the end")
 
@@ -7785,10 +8018,11 @@ def main():
                          if not x.startswith("C_VALUECURVE_Brightness=")]
                 parts.append(
                     "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
-                    "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.06;1.000:0.06")
+                    "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.06;1.000:0.06")
                 eff.palette = pal.model_copy(update={"extra_parts": parts})
                 _n_hushed += 1
         if _n_hushed:
+            _probe("Double-drop stage one")
             print(f"Double-drop stage one: hushed {_n_hushed} effects so the "
                   f"outlines carry it")
 
@@ -7875,6 +8109,7 @@ def main():
             _cut_quiet += _before - len(_kept)
         effects = _kept
         if _cut_fast or _cut_quiet:
+            _probe("Floods: dropped")
             print(f"Floods: dropped {_cut_fast} faster than a quarter note, "
                   f"{_cut_quiet} others (quiet passages, or over the "
                   f"{_FLOOD_FLASH_CAP}-flash ceiling)")
@@ -7919,6 +8154,7 @@ def main():
                     last = eff.start_time_ms
     if _dropped:
         effects = [e for e in effects if id(e) not in _dropped]
+    _probe("Flash-rate cap")
     print(f"Flash-rate cap: dropped {len(_dropped)} flashes closer than "
           f"{_MIN_FLASH_GAP_MS}ms on the same prop")
 
@@ -8010,7 +8246,163 @@ def main():
         if new is not base or True:
             eff.palette = new
             _rebuilt += 1
+    _probe("Pulse curves rebuilt")
     print(f"Pulse curves rebuilt for final spans: {_rebuilt}")
+
+    # =====================================================================
+    # Shader dwell -- the last thing before the write, so it sees the spans
+    # as they will actually render rather than as any one pass intended them.
+    #
+    # "At :48 there's a shader and then a new one at :50 and that turns off at
+    # :51 and another one turns on at :52, it's messy and not on the beat of
+    # the piano chords. At 2:14 there's another shader that starts on the beat
+    # and a second later turns off and a different one comes in, and same with
+    # the final 2:40 moment."
+    #
+    # Measured on v13: 35% of shader spans were under four seconds, 29 of them
+    # separated by a sub-2.5s hole, and 13 places had two different shaders
+    # running on two layers of the SAME prop within a second of each other.
+    # Every pass individually looked reasonable; the mess was emergent, so it
+    # can only be fixed here, where the whole timeline is visible.
+    _SHADER_MIN_DWELL_MS = 4000
+    _SHADER_GAP_MS = 2500
+    # A shader change is itself a musical event, so it belongs ON a chord
+    # rather than near one -- "it's messy and not on the beat of the piano
+    # chords". Anchors are the chord/bass hits the ambient analysis already
+    # found plus the section boundaries; a start within 600ms of one snaps to
+    # it, which is close enough to be the same intended moment and far enough
+    # not to drag a start across to a different chord.
+    _anchors = sorted(
+        [t for _ap in ambient_passages for t in _ap.get("sparse", [])]
+        + [sec.start_time for sec in analysis.sections])
+    _snapped = 0
+    if _anchors:
+        import bisect as _bisect
+        for _e in effects:
+            if _e.effect_name != "Shader":
+                continue
+            _t = _e.start_time_ms / 1000.0
+            _j = _bisect.bisect_left(_anchors, _t)
+            _best = min((_anchors[k] for k in (_j - 1, _j)
+                         if 0 <= k < len(_anchors)),
+                        key=lambda x: abs(x - _t), default=None)
+            if _best is not None and abs(_best - _t) <= 0.6:
+                _ms = int(_best * 1000)
+                if _ms < _e.end_time_ms - 400:
+                    _e.start_time_ms = _ms
+                    _snapped += 1
+    _by_prop: dict[str, list] = {}
+    for _e in effects:
+        if _e.effect_name == "Shader":
+            _by_prop.setdefault(_e.model_name, []).append(_e)
+    _drop: set[int] = set()
+    _stacked = _merged = _closed = 0
+    for _mn, _lst in _by_prop.items():
+        _lst.sort(key=lambda e: (e.start_time_ms, e.layer))
+        # (a) two shaders on different layers of one prop, starting together:
+        #     the eye reads this as the shader "changing" instantly. Keep the
+        #     lower layer, which is the one carrying the section's identity.
+        for _i, _a in enumerate(_lst):
+            for _b in _lst[_i + 1:]:
+                if _b.start_time_ms - _a.start_time_ms > 1500:
+                    break
+                if _b.layer != _a.layer and _b.start_time_ms < _a.end_time_ms:
+                    _lose = _a if _a.layer > _b.layer else _b
+                    if id(_lose) not in _drop:
+                        _drop.add(id(_lose))
+                        _stacked += 1
+        for _lay in {e.layer for e in _lst}:
+            _row = [e for e in _lst if e.layer == _lay and id(e) not in _drop]
+            _row.sort(key=lambda e: e.start_time_ms)
+            _i = 0
+            while _i < len(_row):
+                _e = _row[_i]
+                _nxt = _row[_i + 1] if _i + 1 < len(_row) else None
+                _span = _e.end_time_ms - _e.start_time_ms
+                if _span < _SHADER_MIN_DWELL_MS and not is_ambient_eff(_e):
+                    # Too brief to register as anything but a blink. Prefer to
+                    # LENGTHEN it into the hole ahead of it; only drop it if
+                    # there is genuinely no room, so a deliberate accent on a
+                    # hit survives as a longer version of itself.
+                    _room = (_nxt.start_time_ms if _nxt else _e.end_time_ms + 99999)
+                    if _room - _e.start_time_ms >= _SHADER_MIN_DWELL_MS:
+                        _e.end_time_ms = min(_room,
+                                             _e.start_time_ms + _SHADER_MIN_DWELL_MS)
+                        _merged += 1
+                    elif _i > 0:
+                        _prev = _row[_i - 1]
+                        _prev.end_time_ms = max(_prev.end_time_ms, _e.end_time_ms)
+                        _drop.add(id(_e))
+                        _merged += 1
+                        _row.pop(_i)
+                        continue
+                # (c) close the holes: a shader going dark for under 2.5s and
+                #     being replaced reads as a glitch, not as a change.
+                if _nxt is not None and 0 < _nxt.start_time_ms - _e.end_time_ms <= _SHADER_GAP_MS:
+                    _e.end_time_ms = _nxt.start_time_ms
+                    _closed += 1
+                _i += 1
+    if _drop:
+        effects = [e for e in effects if id(e) not in _drop]
+    print(f"Shader dwell: {_snapped} starts snapped to a chord or section, "
+          f"{_stacked} stacked shaders removed, {_merged} short "
+          f"spans lengthened or merged, {_closed} gaps closed "
+          f"(min dwell {_SHADER_MIN_DWELL_MS / 1000:.0f}s)")
+
+    _probe("before write")
+
+    # =====================================================================
+    # Same-layer overlap resolution -- MUST be last, after every pass that
+    # can move or lengthen an effect.
+    #
+    # An xLights EffectLayer is a single timeline: two effects cannot occupy
+    # the same milliseconds on it. 21% of the effects in this song were doing
+    # exactly that, because a dozen passes each place effects independently
+    # and none of them could see the others. The chord gestures were the
+    # clearest casualty -- three washes on Corner Verticals L1 at 26.43-29.02,
+    # 27.23-29.82 and 28.85-31.45, each correct on its own, together
+    # unrenderable, which is why those props measured DARK in the .fseq while
+    # the .xsq looked right. This is almost certainly why several rounds of
+    # fixes have measured inert: the change was real in the file and never
+    # reached the pixels.
+    #
+    # Resolution moves the LATER effect up a layer, which is both what the eye
+    # expects (the newer event paints over the older) and what preserves the
+    # long decay tails that make a chord ring. Truncation is the fallback for
+    # when there is genuinely no free layer.
+    _MAX_LAYER = 12
+    _lanes: dict[tuple[str, int], list] = {}
+    for _e in effects:
+        _lanes.setdefault((_e.model_name, _e.layer), []).append(_e)
+    _moved = _cut = 0
+    _busy = {k: sorted((e.start_time_ms, e.end_time_ms) for e in v)
+             for k, v in _lanes.items()}
+    for (_mn, _lay), _row in sorted(_lanes.items()):
+        _row.sort(key=lambda e: (e.start_time_ms, e.end_time_ms))
+        _end = None
+        for _e in _row:
+            if _end is not None and _e.start_time_ms < _end:
+                _dest = None
+                for _l2 in range(_lay + 1, _MAX_LAYER):
+                    _occ = _busy.get((_mn, _l2), [])
+                    if not any(_e.start_time_ms < _b and _a < _e.end_time_ms
+                               for _a, _b in _occ):
+                        _dest = _l2
+                        break
+                if _dest is not None:
+                    _busy.setdefault((_mn, _dest), []).append(
+                        (_e.start_time_ms, _e.end_time_ms))
+                    _e.layer = _dest
+                    _moved += 1
+                    continue
+                _e.start_time_ms = _end
+                _cut += 1
+                if _e.end_time_ms - _e.start_time_ms < 200:
+                    _e.end_time_ms = _e.start_time_ms + 200
+            _end = max(_end or 0, _e.end_time_ms)
+    print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
+          f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
+          f"effects on it do not render)")
 
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
