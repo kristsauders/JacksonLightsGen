@@ -4675,6 +4675,46 @@ def main():
             f"{section.label} #{inst} energy={e:.2f} -> {n_active}/{n_cast} targets lit "
             f"({n_active/n_cast*100:.0f}%), {n_feature} feature, palette={pal_name}")
 
+    # --- WHOLE-TRACK BUILD, and the dropout at the end ---------------------
+    # "Really I think the whole track is really an intro, so it needs to build
+    # and get bigger and bigger throughout the whole thing... and at the end
+    # there's the last drum hit where most of the instruments drop out and it
+    # should be a dramatic dropout for the lights too where only outlines stay
+    # on or only floods, something minimal but still large scale."
+    #
+    # Both are detected rather than hardcoded to one song. A track "builds" if
+    # its energy rises across most of its length -- This Version of You
+    # measures 0.16, 0.37, 0.65, 0.95, 1.00, 0.55 by sixths, i.e. four
+    # consecutive rises. A track has a final dropout if the last strong drum
+    # hit is followed by a long, much quieter tail (that song: hit at 155.7s,
+    # then 16s at 0.41x the song mean).
+    _sixth = []
+    _rms_s = np.asarray(analysis.spectrum.rms_energy)
+    _rt_s = np.asarray(analysis.spectrum.rms_times)
+    _dur_s = float(analysis.duration_seconds)
+    for _i in range(6):
+        _m = (_rt_s >= _dur_s * _i / 6) & (_rt_s < _dur_s * (_i + 1) / 6)
+        _sixth.append(float(_rms_s[_m].mean()) if _m.any() else 0.0)
+    _rises = sum(1 for _i in range(4) if _sixth[_i + 1] > _sixth[_i] * 1.05)
+    song_builds = _rises >= 3
+    if song_builds:
+        print(f"Whole-track build: energy rises through {_rises} of 5 steps -- "
+              f"the show grows with it")
+
+    final_dropout = None
+    _kv2 = voices.get("kick")
+    _sv2 = voices.get("snare")
+    _hits = sorted(list(_kv2.onsets if _kv2 else []) + list(_sv2.onsets if _sv2 else []))
+    if _hits:
+        _last_hit = _hits[-1]
+        _tail = _rms_s[_rt_s > _last_hit]
+        if (_dur_s - _last_hit >= 8.0 and len(_tail)
+                and _tail.mean() < _rms_s.mean() * 0.65):
+            final_dropout = _last_hit
+            print(f"Final dropout: last drum hit at {_last_hit:.1f}s, "
+                  f"{_dur_s - _last_hit:.0f}s of tail at "
+                  f"{_tail.mean() / _rms_s.mean():.2f}x the song mean")
+
     # --- AMBIENT PASSAGES: sequence the SHAPE, not the beat ----------------
     #
     # "For the slower/quieter/intro/outro type sections we need a different
@@ -4737,6 +4777,13 @@ def main():
             # Intensity follows the passage's measured loudness: a loud
             # drumless synth passage should be big, a dark intro should not.
             loud = float(ap.get("loud", 0.5))
+            # On a track that builds, WHERE the passage sits matters as much
+            # as how loud it is: an intro passage should be smaller than the
+            # same passage two thirds of the way in, so the show grows with
+            # the song rather than restating one level.
+            if song_builds:
+                _pos = min(1.0, max(0.0, (t0 / max(_dur_s, 1e-6))))
+                loud *= 0.55 + 0.85 * _pos
             # (a) the canvases hold ONE developing pattern for the whole
             #     passage, breathing with the section's own energy curve.
             key = amb_rng.choice([k for k in SHADER_KEYS
@@ -7016,11 +7063,23 @@ def main():
         # Applied as a ceiling on the brightness curve rather than by removing
         # content, so the passage keeps its texture and movement and simply
         # sits lower. Effects with no curve get a flat one at the same level.
-        # 0.78 was not nearly enough: it left Harmony's quiet passages still
-        # 14% BRIGHTER than its loud ones and Cruise exactly level. The target
-        # is quiet sitting 15-30% below loud, so the factor has to overcome
-        # the gap as well as create the margin.
+        # A UNIFORM FACTOR CANNOT HIT A PER-SONG TARGET. 0.50 landed Harmony
+        # at -18% and This Version of You at -25% (both in the 15-30% band
+        # Krists asked for) but Cruise at -37% and Meridian at -46%, which is
+        # near the "half as bright" he had already rejected as too dark. How
+        # much of a song's light comes from the ambient pass versus every
+        # other pass differs per song, so the same multiplier lands
+        # differently.
+        #
+        # The factor is therefore calibrated per song from a real render and
+        # cached -- see calibrate_ambient_dim.py. Absent a cache it falls back
+        # to 0.50, which is right for about half the library.
         _DIM = 0.50
+        try:
+            _DIM = float(json.loads(
+                (GEN_DIR / "ambient_dim.json").read_text())["dim"])
+        except (OSError, ValueError, KeyError):
+            pass
         _dimmed = 0
         for eff in _kept3:
             # OVERLAP, not start-inside: a hold that begins before the passage
@@ -7033,6 +7092,19 @@ def main():
             pal = eff.palette
             if pal is None:
                 continue
+            # THE BUILD RIDES ON THE DIM, not on the envelope depth. Scaling
+            # depth by song position measured as completely inert (brightness
+            # by sixth identical to three decimal places), the same way every
+            # other depth-based attempt has; the dim factor is the lever that
+            # actually moves the render. On a building track an early passage
+            # is dimmed harder than a late one, so the show grows across the
+            # song instead of restating one level -- This Version of You's
+            # lights peaked in the THIRD sixth while its music peaks in the
+            # fifth.
+            _f = _DIM
+            if song_builds:
+                _pos = min(1.0, eff.start_time_ms / 1000.0 / max(_dur_s, 1e-6))
+                _f = _DIM * (0.62 + 0.68 * _pos)
             parts = list(pal.extra_parts or [])
             vc = next((x for x in parts if x.startswith("C_VALUECURVE_Brightness=")),
                       None)
@@ -7045,14 +7117,14 @@ def main():
                     if ":" not in seg:
                         continue
                     t_, v_ = seg.split(":")
-                    pts.append(f"{float(t_):.3f}:{max(0.02, float(v_) * _DIM):.2f}")
+                    pts.append(f"{float(t_):.3f}:{max(0.02, float(v_) * _f):.2f}")
                 parts = [x for x in parts if x is not vc] + [
                     vc.split("Values=")[0] + "Values=" + ";".join(pts)]
             else:
                 parts.append(
                     "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
                     f"Type=Flat|Min=0.00|Max=400.00|RV=TRUE|"
-                    f"Values=0.000:{VC_NOMINAL * _DIM:.2f};1.000:{VC_NOMINAL * _DIM:.2f}")
+                    f"Values=0.000:{VC_NOMINAL * _f:.2f};1.000:{VC_NOMINAL * _f:.2f}")
             eff.palette = pal.model_copy(update={"extra_parts": parts})
             _dimmed += 1
         if _dimmed:
@@ -7082,6 +7154,44 @@ def main():
         effects = _kept
         print(f"Ambient passages: cleared {_cut} rhythmic hits from "
               f"{len(ambient_passages)} smooth passages")
+
+    # --- final dropout ----------------------------------------------------
+    # After the last drum hit the band leaves and so does the show: everything
+    # but the linear props is cleared, and those hold a dim, steady level.
+    # "Something minimal but still large scale" -- outlines spanning the house
+    # read as large without being bright, which a handful of lit props would
+    # not.
+    if final_dropout is not None:
+        _fd = int(final_dropout * 1000) + 400
+        _keepers = {t["name"] for t in cast
+                    if t["cat"] in ("single_line", "icicle")
+                    or any(h in t["name"].lower()
+                           for h in ("outline", "vertical", "horizontal", "c9"))}
+        _kept, _cut = [], 0
+        for eff in effects:
+            if eff.end_time_ms <= _fd:
+                _kept.append(eff)
+                continue
+            base = eff.model_name.split("/")[0]
+            if eff.model_name in _keepers or base in _keepers:
+                _kept.append(eff)
+                continue
+            if eff.start_time_ms < _fd:      # trim rather than drop
+                eff.end_time_ms = _fd
+                _kept.append(eff)
+                continue
+            _cut += 1
+        effects = _kept
+        _dim_tail = PALETTES["ice"].model_copy(update={"extra_parts": [
+            "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+            "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.11;1.000:0.11"]})
+        _n_tail = 0
+        for t in cast:
+            if t["name"] in _keepers:
+                add_target(t, L_BASE, "wash", _fd, int(_dur_s * 1000), _dim_tail)
+                _n_tail += 1
+        print(f"Final dropout: cleared {_cut} effects after "
+              f"{final_dropout:.1f}s, {_n_tail} outlines held dim to the end")
 
     # --- flood discipline -------------------------------------------------
     # "Across songs we're using the floods too much and strobing or pulsing

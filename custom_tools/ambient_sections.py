@@ -50,6 +50,9 @@ SHOW_PATH = Path("/Volumes/XLIGHTS/XLights 2026")
 AMBIENT_DRUM_RATE = 0.40
 # ...or the section is simply quiet, whatever its drums are doing.
 AMBIENT_LOUD = 0.55
+# ...and in a quiet passage, a beat this sparse or sparser. Above it there is
+# a groove worth following even though the passage is quiet.
+AMBIENT_QUIET_DRUMS = 1.20
 
 
 def analyse(song: str) -> dict:
@@ -103,9 +106,21 @@ def analyse(song: str) -> dict:
             "enters": enters,
         })
 
+    # QUIET IS NOT THE SAME AS BEATLESS -- and treating it as such was about
+    # to wreck two songs. The WhatsApp Shakespeare classified 100% ambient
+    # (one passage over the whole track) on a loudness of 0.39, despite 1.70
+    # drum hits per second; Too Slow had passages at 3.33 and 4.21 hits per
+    # second marked ambient for the same reason. Both would have lost their
+    # rhythm entirely, and this is an R&B track Krists has praised.
+    #
+    # A passage only gets the smooth treatment if there is genuinely no pulse
+    # to follow: either almost no drums at all, or a quiet passage whose beat
+    # is sparse enough that following it would be the wrong instinct anyway.
+    # A quiet section with a real beat wants a GENTLER rhythm, not none.
     for r in rows:
         r["ambient"] = (r["drum_rate"] < AMBIENT_DRUM_RATE
-                        or r["loud"] < AMBIENT_LOUD)
+                        or (r["loud"] < AMBIENT_LOUD
+                            and r["drum_rate"] < AMBIENT_QUIET_DRUMS))
 
     # MERGE INTO PASSAGES. The section detector emits slivers -- 100 of them
     # in 172s on This Version of You, about one per bar -- and a plan written
