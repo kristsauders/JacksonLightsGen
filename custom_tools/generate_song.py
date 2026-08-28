@@ -3933,6 +3933,15 @@ def main():
         # see any verts or horizontals or outlines or c9s pulsing, they're
         # still only doing movement." High-energy sections always flash --
         # that's where the "pulsing like crazy" belongs.
+        # Never in an ambient passage. This pass flashes the linear props on
+        # the beat, and in a drumless passage there is no beat to flash to --
+        # measured on This Version of You, the arches were firing 1,2,3,4,4,3,
+        # 2,1 every 0.45s straight through the piano intro, which is Krists's
+        # "there is something else happening too on some other rhythm and it's
+        # distracting". The ambient clearing did not catch it because these
+        # land on the motion layer, which that pass deliberately leaves alone.
+        if in_ambient(section.start_time):
+            continue
         if section.energy_level >= 0.65:
             ens_flash_sections.add(si)
         elif section.energy_level >= 0.40 and _ens_rng.random() < 0.60:
@@ -4553,11 +4562,21 @@ def main():
                             ph = bi % period
                             idx = ph if ph < n_m else period - ph
                             m = ordered[idx]
+                            if in_ambient(t):
+                                continue
                             t_ms = int(t * 1000)
                             add(m, L_MOTION, "on_hit", t_ms, t_ms + hold, palette)
                             continue
                         going_forward = (bi // n_m) % 2 == 0
                         m = (ordered if going_forward else reversed_order)[bi % n_m]
+                        # Not in an ambient passage. This walks a group's
+                        # members on EVERY BEAT -- measured on This Version of
+                        # You, the arches ran 1,2,3,4,4,3,2,1 every 0.45s
+                        # straight through a drumless piano intro. It is the
+                        # last of the beat-driven passes that had no idea the
+                        # passage had no beat.
+                        if in_ambient(t):
+                            continue
                         t_ms = int(t * 1000)
                         # on_hit (sharp attack), not on_swell (soft 150ms
                         # fade-in) -- a slow fade-in undercuts the sense of
@@ -6355,6 +6374,13 @@ def main():
         n = len(seq)
         if n < 2:
             return
+        # A whole-display sweep is a fast directional gesture that follows the
+        # synth zips, not the chords -- the opposite of what a smooth passage
+        # wants. Measured on This Version of You, this pass alone put 420
+        # off-chord placements into a piano intro that should carry nothing
+        # but chord swells.
+        if in_ambient(start_ms / 1000.0):
+            return
         span = max(end_ms - start_ms, n * 25)
         hold = max(160, int(span / n * 2.2))
         for k, t in enumerate(seq):
@@ -6380,6 +6406,8 @@ def main():
         s_ms, e_ms = int(r["start_time"] * 1000), int(r["end_time"] * 1000)
         order = cast_by_y if r.get("kind") == "tonal" else cast_by_x
         display_sweep(order, s_ms, e_ms, PALETTES["ice"], key="on_swell", max_t=30)
+        if in_ambient(r["start_time"]):
+            continue          # a build inside a smooth passage fights the chords
         log(r["start_time"], "riser",
             f"{'vertical' if r.get('kind')=='tonal' else 'horizontal'} build ({r['duration']:.1f}s)")
     print(f"Long riser builds: {min(len(long_risers), 24)}")
@@ -7260,7 +7288,16 @@ def main():
                              key=lambda t: (t["name"] in MUST_HAVE_GROUPS, t["n"]))
             members = sorted(mel_target["members"],
                              key=lambda m: positions.get(m, {}).get("x", 0))
-            n_deg = melody_notes[0].get("n_degrees", 1) or 1
+            # Drop notes inside an ambient passage. The melody follows the
+            # strings or vocal, a DIFFERENT rhythm from the piano chords such a
+            # passage is built around -- "there is something else happening too
+            # on some other rhythm... it should really be just smooth movement
+            # flowing, with on/fadeout on each of those piano chords."
+            melody_notes = [n for n in melody_notes
+                            if not in_ambient(n.get("start", 0.0))]
+            if not melody_notes:
+                mel_candidates = []
+            n_deg = (melody_notes[0].get("n_degrees", 1) or 1) if melody_notes else 1
             for note in melody_notes:
                 # Map the note's pitch rank onto a member index. More notes
                 # than props is normal -- several adjacent semitones share a
@@ -7273,9 +7310,10 @@ def main():
                 add(members[idx], L_SIG, "on_swell", s_ms, e_ms,
                     PALETTES["gold"])
                 n_melody += 1
-            log(melody_notes[0]["start"], "melody",
-                f"{len(melody_notes)} notes over {n_deg} pitches -> "
-                f"{mel_target['name']} ({len(members)} members) by pitch height")
+            if melody_notes:
+                log(melody_notes[0]["start"], "melody",
+                    f"{len(melody_notes)} notes over {n_deg} pitches -> "
+                    f"{mel_target['name']} ({len(members)} members) by pitch height")
     print(f"Melody notes mapped: {n_melody}"
           + (f" -> {mel_target['name']}" if n_melody else ""))
 
@@ -7546,17 +7584,25 @@ def main():
                     if t["cat"] in ("single_line", "icicle")
                     or any(h in t["name"].lower()
                            for h in ("outline", "vertical", "horizontal", "c9"))}
+        # Clear from the HIT, not from the downbeat after it. The outline hold
+        # still begins on the downbeat, but everything else stops the moment
+        # the drum lands -- otherwise the gap between them fills with the
+        # flurry Krists describes: "we're hitting it but then also doing
+        # something right after, but it should be just a slow fade." Measured
+        # on This Version of You, 145 effects started between 154.5 and 160s,
+        # clustered at 154.7 through 155.5.
+        _cut_from = int(final_dropout * 1000) + 150
         _kept, _cut = [], 0
         for eff in effects:
-            if eff.end_time_ms <= _fd:
+            if eff.end_time_ms <= _cut_from:
                 _kept.append(eff)
                 continue
             base = eff.model_name.split("/")[0]
             if eff.model_name in _keepers or base in _keepers:
                 _kept.append(eff)
                 continue
-            if eff.start_time_ms < _fd:      # trim rather than drop
-                eff.end_time_ms = _fd
+            if eff.start_time_ms < _cut_from:   # trim rather than drop
+                eff.end_time_ms = _cut_from
                 _kept.append(eff)
                 continue
             _cut += 1
