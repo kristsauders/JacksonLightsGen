@@ -4614,7 +4614,15 @@ def main():
                         n_shader_pulse += hold_spans(target, L_MOTION, key,
                                                      section, palette,
                                                      large_seat, e)
-                    else:
+                    elif not (target.get("large") and in_ambient(section.start_time)):
+                        # The ambient deferral lives inside hold_spans, so this
+                        # fallback -- taken when a section has too few bar
+                        # marks -- was placing a full-section shader on the
+                        # canvases regardless. That is what cut short the
+                        # 1:17 hold on This Version of You: the ambient pass
+                        # placed Herringbone from 77.10 to 114.78 and this put
+                        # Aurora Curtain over it at 78.47, leaving the good
+                        # shader 1.33s of screen time.
                         add_target(target, L_MOTION, key, sec_start, sec_end, palette)
 
                     # LAYER a cone-appropriate accent ON TOP of a shader.
@@ -6450,6 +6458,8 @@ def main():
     # every detected cutout makes the biggest gesture in the show routine.
     climax_drop_rng = random.Random(f"{SONG_NAME}|climax-drop")
 
+    _climax_shared_key = climax_drop_rng.choice(SAFE_LARGE)
+
     def drop_hit_key(t, is_climax=False):
         """Vary the drop payload by shape instead of a flat On-burst
         everywhere -- direct feedback wanted the peak moment to show
@@ -6466,7 +6476,15 @@ def main():
         ongoing section the eye has time to notice as inconsistent."""
         if t.get("large"):
             if is_climax:
-                return climax_drop_rng.choice(SAFE_LARGE)
+                # ONE shader across the canvases, not one each. The climax was
+                # deliberately given per-canvas variety on the theory that a
+                # ~2s burst is too brief to read as inconsistent. On a quiet
+                # song it is not: "at :51 all the matrices have different
+                # effects which looks a bit odd." Measured there -- Spirograph
+                # Spectrum, Rain on Glass, Black Cherry Cosmos, Liquid Chrome
+                # and Stained Glass, one per matrix, all at once. The matrices
+                # are one surface and should agree.
+                return _climax_shared_key
             return "pinwheel" if t["cat"] == "tree" else "spirals"
         if t["cat"] == "arch":
             return "chase_mid_out"
@@ -7437,6 +7455,42 @@ def main():
         # treatment. Any such curve inside an ambient passage is replaced with
         # the passage's own energy contour over that effect's span, which
         # moves on the scale of bars because the music does.
+        # THE AMBIENT HOLD OWNS ITS LAYER. Effects share layer slots, so an
+        # earlier short span sitting on the same layer silently displaces the
+        # long hold: on This Version of You the ambient pass placed Herringbone
+        # from 77.10 to 114.78 and a 1.33s span already on that layer meant the
+        # 37-second hold never appeared at all -- which is why the 1:17 shader
+        # "changes to a different one a second later". Anything overlapping an
+        # ambient hold on the same model and layer, that is not itself part of
+        # the ambient treatment, is removed.
+        _amb_spans = [(e.model_name, e.layer, e.start_time_ms, e.end_time_ms)
+                      for e in _kept if id(e) in _ambient_ids
+                      and e.end_time_ms - e.start_time_ms >= 4000]
+        _displaced = 0
+        _kept2b = []
+        for eff in _kept:
+            # Long holds are never the interloper -- and cannot be identified
+            # by id(), because clip_for_blackout REBUILDS effects as new
+            # objects and every id-based tag is lost at that point. That is
+            # how this filter deleted the very hold it was written to protect:
+            # the 37-second Herringbone survived the ambient pass, was clipped
+            # into a new object, and was then removed here as an intruder.
+            # Anything id-based must run before the clipping, or key on
+            # something the clipping preserves.
+            if eff.end_time_ms - eff.start_time_ms >= 4000:
+                _kept2b.append(eff)
+                continue
+            if id(eff) not in _ambient_ids and any(
+                    eff.model_name == m and eff.layer == ly
+                    and eff.start_time_ms < b and eff.end_time_ms > a
+                    for m, ly, a, b in _amb_spans):
+                _displaced += 1
+                continue
+            _kept2b.append(eff)
+        if _displaced:
+            print(f"Ambient passages: removed {_displaced} effects sharing a "
+                  f"layer with a long hold")
+        _kept = _kept2b
         _kept3 = []
         for eff in _kept:
             pal = eff.palette
@@ -7602,7 +7656,19 @@ def main():
                 _kept.append(eff)
                 continue
             if eff.start_time_ms < _cut_from:   # trim rather than drop
-                eff.end_time_ms = _cut_from
+                # ...and fade it out. A trimmed effect otherwise just stops:
+                # "the big drop out at 2:33 is on the beat but then it just
+                # turns completely off a second or two later without fading,
+                # so it also seems random." Trimming is a structural decision;
+                # the eye should still see a decay.
+                # Extend PAST the cut and fade there, rather than ending at
+                # it. A fade-out lives inside an effect's own span, so cutting
+                # to _cut_from and adding one made everything dim BEFORE the
+                # hit -- the moment measured 66.6 down to 34.9. Letting it run
+                # on and decay puts the fade where the ear expects it: the hit
+                # lands at full, then the house falls away.
+                eff.end_time_ms = _cut_from + 1600
+                eff.settings = {**eff.settings, "T_TEXTCTRL_Fadeout": "1.5"}
                 _kept.append(eff)
                 continue
             _cut += 1
@@ -7624,19 +7690,41 @@ def main():
         _tail_ch = ([c for c in voices["chord"].in_window(final_dropout,
                                                           _dur_s)]
                     if "chord" in voices else [])
+        # 1.5s thinning dropped half of them -- This Version of You's closing
+        # chords sit 1.1-1.3s apart, so "we're only showing two of the 4".
         _thin, _last_c = [], -9.0
         for _c in _tail_ch:
-            if _c - _last_c >= 1.5:
+            if _c - _last_c >= 0.9:
                 _thin.append(_c)
                 _last_c = _c
-        for _c in _thin:
+        for _ci, _c in enumerate(_thin):
+            _is_final = _ci == len(_thin) - 1
+            # THE FINALE OPENS OUT. "That's the finale so it needs to be calm
+            # but brighter, like all the outlines and maybe all the props
+            # could come in on the final chord and very slowly everything
+            # fades out." Every chord before it stays on the outlines and
+            # grows a little; the last one brings the whole house in and then
+            # fades to the end of the song.
+            _grow = 0.5 + 0.5 * (_ci / max(len(_thin) - 1, 1))
+            _pal_t = PALETTES["ice"].model_copy(update={"extra_parts": [
+                "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                f"Type=Flat|Min=0.00|Max=400.00|RV=TRUE|"
+                f"Values=0.000:{VC_NOMINAL * _grow:.2f};1.000:{VC_NOMINAL * _grow:.2f}"]})
             for t in cast:
-                if t["name"] not in _keepers:
+                _in = t["name"] in _keepers
+                if _is_final:
+                    if prominence_of(t) < 2 and not _in:
+                        continue
+                elif not _in:
                     continue
-                add_target(t, L_MOTION, "wash", int(_c * 1000),
-                           int(_c * 1000) + 2200, PALETTES["ice"],
-                           extra={"T_TEXTCTRL_Fadein": "0.25",
-                                  "T_TEXTCTRL_Fadeout": "1.80"})
+                _end = (int(_dur_s * 1000) if _is_final
+                        else int(_c * 1000) + 2200)
+                add_target(t, L_MOTION, "wash", int(_c * 1000), _end,
+                           PALETTES["white"] if _is_final else _pal_t,
+                           extra={"T_TEXTCTRL_Fadein": "0.20",
+                                  "T_TEXTCTRL_Fadeout":
+                                  f"{max(2.5, (_end / 1000.0 - _c) * 0.85):.1f}"
+                                  if _is_final else "1.80"})
         if _thin:
             print(f"Final dropout: {len(_thin)} closing chords still answered "
                   f"by the outlines")
