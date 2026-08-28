@@ -3086,7 +3086,101 @@ def main():
             if _prev is None or _t - _prev >= 4.0:
                 _entrances.append(float(_t))
             _prev = _t
-    _entrances = sorted(set(round(x, 2) for x in _entrances))
+    # ...and the mirror image: a sustained energy STEP DOWN is a section
+    # change too. The generator detects steps up (drops) and nothing for the
+    # other direction, so a chorus ending had nothing to mark it:
+    #
+    #   "In Harmony at 2:12 the chorus ends and an ambient part starts but the
+    #    lights stay the same... you don't see the section change, it should
+    #    be more visible."
+    #
+    # Measured there, the music halves from 0.659 to 0.345 across 132s while
+    # the nearest section boundary sits at 121.8s -- the detector simply misses
+    # it. A level that falls by a third and STAYS down is a structural moment
+    # whatever the boundary detector thinks.
+    _rms_e = np.asarray(analysis.spectrum.rms_energy)
+    _rt_e = np.asarray(analysis.spectrum.rms_times)
+    _win = 4.0
+    _step = float(_rt_e[1] - _rt_e[0]) if len(_rt_e) > 1 else 0.023
+    _w = max(2, int(_win / _step))
+    # Deduped against OTHER step-downs only, not against entrances: Harmony
+    # has 26 detected entrances spaced about 5.5s apart, so anything suppressed
+    # by proximity to one is suppressed everywhere, and the 2:12 drop-down --
+    # the exact moment Krists reported -- was being discarded.
+    _stepdowns: list[float] = []
+    for _i in range(_w, len(_rms_e) - _w):
+        _before = _rms_e[_i - _w:_i].mean()
+        _after = _rms_e[_i:_i + _w].mean()
+        if _before > 1e-6 and _after / _before <= 0.65:
+            # Advance to where the level actually SETTLES, not where it
+            # starts to fall: the first sample past the midpoint between the
+            # old and new plateaus. Snapping from the fall's start put
+            # Harmony's 2:12 change at 131.08 -- a full bar early.
+            _mid = (_before + _after) / 2.0
+            _j = _i
+            while _j < len(_rms_e) - 1 and _rms_e[_j] > _mid:
+                _j += 1
+            _t = float(_rt_e[_j])
+            # Snap forward to the next downbeat. The detector fires where the
+            # level STARTS falling -- 130.6 on Harmony, while the new section
+            # begins at 132.0 -- the same off-by-a-moment the drop snapping
+            # had to fix in the other direction. A section change lands on a
+            # downbeat, so that is where the look should turn over.
+            _nd = next((d for d in downbeats if d >= _t - 0.05), None)
+            if _nd is not None and _nd - _t <= 3.0:
+                _t = float(_nd)
+            if all(abs(_t - x) > 6.0 for x in _stepdowns):
+                _stepdowns.append(_t)
+    if _stepdowns:
+        print(f"Energy step-downs: {len(_stepdowns)} section endings marked "
+              f"({', '.join(f'{x:.1f}' for x in _stepdowns[:6])}"
+              f"{'...' if len(_stepdowns) > 6 else ''})")
+    _entrances = sorted(set(round(x, 2) for x in _entrances + _stepdowns))
+
+    # SPLIT THE SECTION THERE. Marking the step-down as a moment made the
+    # shader change at 2:12, and the lights still got BRIGHTER across it
+    # (19.9 -> 31.7) because staging works per section: target counts, palette
+    # and energy all come from a section that runs straight through the
+    # change. The boundary detector missed it, so the section has to be split
+    # by hand and each half given its own measured energy -- then everything
+    # downstream reacts to the quieter half on its own terms.
+    _split = 0
+    for _sd in _stepdowns:
+        for _si, _sec in enumerate(analysis.sections):
+            if _sec.start_time + 3.0 < _sd < _sec.end_time - 3.0:
+                _tail = type(_sec)(**{**_sec.__dict__})
+                _tail.start_time = _sd
+                _sec.end_time = _sd
+                for _s2 in (_sec, _tail):
+                    _m = (_rt_e >= _s2.start_time) & (_rt_e < _s2.end_time)
+                    if _m.any():
+                        _s2.energy_level = float(
+                            _rms_e[_m].mean() / max(_rms_e.max(), 1e-9))
+                analysis.sections.insert(_si + 1, _tail)
+                _split += 1
+                break
+    if _split:
+        print(f"Energy step-downs: split {_split} sections so the quieter half "
+              f"is staged on its own terms")
+
+    # Ambient passages are DETECTED here, before anything is staged, because
+    # the ordinary section path has to know to stand down inside them. Placing
+    # the ambient treatment later while the section path kept running produced
+    # exactly what Krists saw: "the shaders keep changing rapidly... there are
+    # just too many changes, it's supposed to feel smooth." Measured, the
+    # matrices changed every 2.6s on This Version of You and every 2.7s on
+    # World Is Mine, with the section path contributing most of it on top of
+    # the ambient holds.
+    ambient_passages: list[dict] = []
+    try:
+        from ambient_sections import analyse as _amb_analyse
+        ambient_passages = [p for p in _amb_analyse(SONG_NAME)["passages"]
+                            if p["ambient"] and p["dur"] >= 8.0]
+    except Exception as _e:
+        print(f"  (ambient-passage analysis unavailable: {_e})")
+
+    def in_ambient(t: float) -> bool:
+        return any(a["t0"] <= t < a["t1"] for a in ambient_passages)
     if _entrances:
         print(f"Instrument entrances: {len(_entrances)} treated as structural "
               f"({', '.join(f'{x:.1f}' for x in _entrances[:6])}"
@@ -3173,6 +3267,12 @@ def main():
         # other section overlapping that cycle places nothing, so the canvas
         # holds one pattern across the whole fade instead of switching partway
         # through it.
+        # Inside an ambient passage the ambient pass owns the big canvases:
+        # one slow hold per passage rather than a new pattern every few
+        # seconds. Without this both were placing, and the section path's
+        # faster cadence is what the eye followed.
+        if target.get("large") and in_ambient(section.start_time):
+            return 0
         cyc = next((c for c in drop_cycles
                     if c[0] < section.end_time and c[1] > section.start_time), None)
         if cyc is not None and target.get("large"):
@@ -3416,6 +3516,17 @@ def main():
         if _moments:
             snapped = []
             for m in marks:
+                # An ENTRANCE beats a section boundary whenever both are in
+                # range, not just when they nearly coincide. Harmony's single
+                # kick at 77.31s sits 3.12s from the boundary at 74.19s -- far
+                # enough apart that both survived as moments, so the mark
+                # snapped to the nearer one and the colour changed three
+                # seconds before the hit it was supposed to mark. The audible
+                # event is the one a viewer is waiting for.
+                near_e = (min(_ent, key=lambda d: abs(d - m)) if _ent else None)
+                if near_e is not None and abs(near_e - m) <= 4.0:
+                    snapped.append(near_e)
+                    continue
                 near = min(_moments, key=lambda d: abs(d - m))
                 snapped.append(near if abs(near - m) <= 4.0 else m)
             for d in _moments:
@@ -4838,14 +4949,6 @@ def main():
     # runs at 0.78-0.80 loudness with zero drums for 37 seconds at a stretch.
     # Drumless is not the same as quiet, so the treatment scales with measured
     # loudness rather than assuming darkness.
-    ambient_passages: list[dict] = []
-    try:
-        from ambient_sections import analyse as _amb_analyse
-        _amb = _amb_analyse(SONG_NAME)
-        ambient_passages = [p for p in _amb["passages"]
-                            if p["ambient"] and p["dur"] >= 8.0]
-    except Exception as _e:
-        print(f"  (ambient-passage analysis unavailable: {_e})")
 
     n_amb = 0
     _ambient_ids: set[int] = set()
@@ -4913,6 +5016,17 @@ def main():
             # correlation between display brightness and music energy by 0.01
             # -- the shaped layer was sitting on an unshaped floor, exactly as
             # the drop/fade envelope did before the same fix.
+            _st = {t: 0.0 for t in ap["sparse"]}
+            for _vn in ("kick", "bass", "chord"):
+                _v = voices.get(_vn)
+                if _v is None:
+                    continue
+                for _t, _s2 in zip(_v.onsets, _v.strengths):
+                    for _e3 in ap["sparse"]:
+                        if abs(_t - _e3) < 0.45:
+                            _st[_e3] = max(_st[_e3], float(_s2))
+            _vals = sorted(_st.values())
+            _big_cut = _vals[int(len(_vals) * 0.6)] if _vals else 0.0
             # SHOW THE HARMONY AT SCALE. "In TVOY there is a slow piano part
             # with one chord at a time and I want to show that on some large
             # scale because it's the main focus point. In Meridian there is
@@ -4942,7 +5056,41 @@ def main():
                 # chord, which is far too much surface for a piano note. The
                 # canvases hold ONE slow envelope across the passage and the
                 # props carry the chord changes.
-                _marks = [t0, t1] if tgt.get("large") else marks_a
+                # A big canvas holds one pattern per passage EXCEPT at the
+                # passage's strongest hits, which get a new colour and shader
+                # so the moment lands. Harmony's single kick at 1:17 is the
+                # case: deferring the whole passage to one hold removed the
+                # change entirely, and Krists wants that hit to be the
+                # impactful thing in a minute of stillness. Capped at three so
+                # the passage still reads as one held idea, not a sequence.
+                if tgt.get("large"):
+                    # Ranked by ISOLATION, not loudness. Harmony's single kick
+                    # at 1:17 is the moment Krists wants marked, and it is not
+                    # among the passage's loudest hits -- what makes it land is
+                    # that nothing else happens for seconds either side of it.
+                    # Strength still breaks ties.
+                    # EVERY hit with real silence in front of it, not a
+                    # top-N: ranking picked the three most isolated and they
+                    # were all early in the passage, so Harmony's 1:17 kick --
+                    # the one moment in a quiet minute -- still got nothing.
+                    # A gap of three seconds or more is what makes a hit read
+                    # as an event; capped only to stop a sparse passage
+                    # turning into a sequence of changes.
+                    # Isolation is judged on the DRUM and BASS hits alone,
+                    # not on the combined event list. Harmony's intro carries
+                    # a chord roughly every second, so nothing in the combined
+                    # list ever looks isolated -- while in the drums the 1:17
+                    # kick has seven clear seconds in front of it, which is
+                    # exactly why it lands as a moment to the ear.
+                    _drum_ev = sorted(t for vn in ("kick", "bass")
+                                      if vn in voices
+                                      for t in voices[vn].in_window(t0, t1))
+                    _tops = [e for i, e in enumerate(_drum_ev)
+                             if (e - _drum_ev[i - 1] if i else 9.0) >= 3.0][:6]
+                    _marks = sorted({t0, t1} | {e for e in _tops
+                                                if t0 + 4 < e < t1 - 4})
+                else:
+                    _marks = marks_a
                 for mi in range(len(_marks) - 1):
                     a_ms, b_ms = int(_marks[mi] * 1000), int(_marks[mi + 1] * 1000)
                     # Each chord takes the next colour of the family, so the
@@ -4972,17 +5120,6 @@ def main():
             # big canvases underneath. The rest keep the quieter bloom, so the
             # big ones stay big by comparison -- if every hit were huge, none
             # of them would read as a moment.
-            _st = {t: 0.0 for t in ap["sparse"]}
-            for _vn in ("kick", "bass", "chord"):
-                _v = voices.get(_vn)
-                if _v is None:
-                    continue
-                for _t, _s2 in zip(_v.onsets, _v.strengths):
-                    for _e3 in ap["sparse"]:
-                        if abs(_t - _e3) < 0.45:
-                            _st[_e3] = max(_st[_e3], float(_s2))
-            _vals = sorted(_st.values())
-            _big_cut = _vals[int(len(_vals) * 0.6)] if _vals else 0.0
             hold = int(min(2400, max(900, (t1 - t0) / max(len(ap["sparse"]), 1) * 900)))
             for ei, et in enumerate(ap["sparse"]):
                 ms = int(et * 1000)
@@ -4998,10 +5135,20 @@ def main():
                             _ambient_ids.add(id(_e2))
                         n_amb += 1
                     # ...and a shockwave crossing the big canvases under it
-                    _ik = impact_key(f"{SONG_NAME}|amb|{pi}|{ei}")
+                    # The canvases SWELL, they do not sweep. A travelling
+                    # gesture crossing a matrix reads as several flashes --
+                    # measured on Harmony's intro, the Sun Room and front
+                    # window matrices showed 2.9 and 3.3 brightness peaks per
+                    # hit while the linear props showed one: "the sun room
+                    # window matrix, three upper window matrices, and floods
+                    # all seem to flash twice on each of those hits that
+                    # should be a smooth hit and fade like the other props."
+                    # One rise and one decay, matching what the outlines do.
                     for tgt in big:
                         _n0 = len(effects)
-                        add_target(tgt, L_MOTION, _ik, ms, ms + 1800, pal)
+                        add_target(tgt, L_MOTION, "wash", ms, ms + 2400, pal,
+                                   extra={"T_TEXTCTRL_Fadein": "0.06",
+                                          "T_TEXTCTRL_Fadeout": "2.00"})
                         for _e2 in effects[_n0:]:
                             _ambient_ids.add(id(_e2))
                         n_amb += 1
@@ -6478,6 +6625,16 @@ def main():
         _new = _snap_drop(float(_ev["drop_time"]))
         if abs(_new - _ev["drop_time"]) > 0.05:
             _snapped += 1
+            # A snap of more than half a second means the detector fired on an
+            # EARLIER arrival than the one the band lands on -- which is the
+            # definition of a double drop. Harmony's 3:18 is detected at 198.6
+            # and snaps to 199.7, and those are exactly the two hits Krists
+            # describes ("at 3:18 nothing happens, it's only on the second
+            # drop at 3:19-3:20 that the lights all come on"). Keeping the
+            # original time gives stage one for free, instead of hunting back
+            # through onsets for it and landing a bar early.
+            if _new - _ev["drop_time"] >= 0.5:
+                _ev["stage1_time"] = float(_ev["drop_time"])
             _ev["drop_time"] = _new
     if _snapped:
         print(f"  snapped {_snapped} drop times onto the drum hit they mark")
@@ -6488,6 +6645,7 @@ def main():
     ci_drop = 0
     # per-prop implosion / one house-wide collapse / a directional wipe
     _collapse_modes = ("prop", "house", "wipe")
+    _stage1_times: set[float] = set()
     for ev in cutouts:
         c0, c1 = int(ev["cutout_start"] * 1000), int(ev["cutout_end"] * 1000)
         drop = int(ev["drop_time"] * 1000)
@@ -6523,6 +6681,13 @@ def main():
         black_end = false_ms or drop
         if ev.get("dropout"):
             black_end = min(black_end, c1 + int(beat_ms * 0.5))
+        # On a double drop the darkness must END at stage one, or it blacks
+        # out the very hit stage one exists to mark. Measured on Harmony: the
+        # display sat at 0.3-0.6 from 198.5 to 199.0, straight through the
+        # 198.6 hit, so "at 3:18 nothing happens".
+        _s1_ms = ev.get("stage1_time")
+        if _s1_ms is not None:
+            black_end = min(black_end, int(float(_s1_ms) * 1000))
         blackout_windows.append((dark_start, max(black_end, dark_start + 200)))
         is_climax_drop = top_drop_time is not None and abs(ev["drop_time"] - top_drop_time) < 0.01
         # Only the strongest drops earn a TOTAL blackout. The climax always
@@ -6552,15 +6717,21 @@ def main():
         # moment feel late. The first stage now gets its own gesture on the
         # linear props, so the house acknowledges the kick and bass arriving
         # and still has the full display in reserve for the real hit.
-        _stage1 = None
-        for _vn in ("kick", "bass"):
+        _stage1 = ev.get("stage1_time")
+        for _vn in (() if _stage1 else ("kick", "bass")):
             _v = voices.get(_vn)
             if _v is None:
                 continue
-            _c = [t_ for t_ in _v.onsets if drop / 1000.0 - 4.0 <= t_
-                  <= drop / 1000.0 - 0.8]
+            # The LAST hit before the drop, and close to it -- not the first
+            # one in a four-second window. Measured on Harmony's 3:18: the
+            # window caught a pickup at 196.0s and staged everything there,
+            # while the hit Krists calls the first drop is at ~198.6 and the
+            # full band lands at 199.7. Stage one belongs to the bar the drop
+            # is in, not to the bar before it.
+            _c = [t_ for t_ in _v.onsets if drop / 1000.0 - 2.2 <= t_
+                  <= drop / 1000.0 - 0.5]
             if _c:
-                _stage1 = min(_c) if _stage1 is None else min(_stage1, min(_c))
+                _stage1 = max(_c) if _stage1 is None else max(_stage1, max(_c))
         if _stage1 is not None and t is cast[0]:
             log(_stage1, "double-drop",
                 f"first stage {drop / 1000.0 - _stage1:.1f}s before the main hit")
@@ -6631,7 +6802,15 @@ def main():
                 add_target(t, L_SIG, collapse_key, c0, dark_start,
                            PALETTES["white"])
             if full_blackout:
-                add_target(t, L_SIG, "off", dark_start, drop, PALETTES["white"])
+                # A double drop's darkness ends AT stage one. Running it to
+                # the main drop blacked out the very hit stage one exists to
+                # mark -- measured on Harmony, the display sat at 0.3-0.6 from
+                # 198.5 to 199.0, straight through it, so the moment Krists
+                # heard as the first drop showed nothing at all.
+                _black_end = (int(_stage1 * 1000) if _stage1 is not None
+                              else drop)
+                add_target(t, L_SIG, "off", dark_start, _black_end,
+                           PALETTES["white"])
             elif t["cat"] in ("single_line", "icicle") or "/" in t["name"]:
                 # Softened pre-drop: outlines only. "Maybe it doesn't always
                 # need to go completely dark, it could just go down to
@@ -6679,14 +6858,26 @@ def main():
             if _stage1 is not None and (t["cat"] in ("single_line", "icicle")
                                         or any(h in t["name"].lower()
                                                for h in ("outline", "vertical",
-                                                         "horizontal", "c9"))):
-                # Stage one: the linear props answer the kick and bass, with a
-                # swell rather than a flash so it reads as an arrival and does
-                # not spend the impact the main hit needs.
+                                                         "horizontal", "c9",
+                                                         "snowflake", "flake",
+                                                         "candy", "cane"))):
+                # STAGE ONE HAS TO READ. "It still only hits on the second part
+                # of the drop, the first part has a very subtle sparkle that's
+                # not impactful. I think the first drop should have all the
+                # outlines come on or maybe just the snowflakes and canes."
+                #
+                # It was being CLEARED: stage one lands several seconds before
+                # the drop (3.5s at Harmony's 3:18) and the ambient pass strips
+                # signature-layer effects that are not within 600ms of a staged
+                # drop. Its time is now registered so the clearing spares it,
+                # the prop set includes the snowflakes and candy canes Krists
+                # named, and it holds full brightness for a beat before
+                # decaying instead of fading from the first frame.
                 _s1 = int(_stage1 * 1000)
-                add_target(t, L_SIG, "on_hit", _s1, _s1 + 1400, PALETTES["white"],
-                           extra={"T_TEXTCTRL_Fadein": "0.05",
-                                  "T_TEXTCTRL_Fadeout": "1.20"})
+                _stage1_times.add(_stage1)
+                add_target(t, L_SIG, "on_hit", _s1, _s1 + 2000, PALETTES["white"],
+                           extra={"T_TEXTCTRL_Fadein": "0.03",
+                                  "T_TEXTCTRL_Fadeout": "1.40"})
             if t.get("large") or prominence_of(t) >= 2:
                 # `on_hit` (a plain On at full level), not a Color Wash: the
                 # wash version only recovered the drop peak from 99 to 104
@@ -7145,7 +7336,8 @@ def main():
     if ambient_passages:
         _rms_all = np.asarray(analysis.spectrum.rms_energy)
         _rt_all = np.asarray(analysis.spectrum.rms_times)
-        _drop_ms = [int(ev["drop_time"] * 1000) for ev in cutouts]
+        _drop_ms = ([int(ev["drop_time"] * 1000) for ev in cutouts]
+                    + [int(x * 1000) for x in _stage1_times])
         _kept, _cut = [], 0
         for eff in effects:
             if id(eff) in _ambient_ids or eff.layer not in (L_PULSE, L_SIG):
@@ -7345,7 +7537,11 @@ def main():
     # read as large without being bright, which a handful of lit props would
     # not.
     if final_dropout is not None:
-        _fd = int(final_dropout * 1000) + 400
+        # On a downbeat, not 400ms after the hit: "the outlines turn blue but
+        # not on rhythm". The change of state is itself a musical moment.
+        _fd_s = next((d for d in downbeats if d >= final_dropout + 0.2),
+                     final_dropout + 0.4)
+        _fd = int(_fd_s * 1000)
         _keepers = {t["name"] for t in cast
                     if t["cat"] in ("single_line", "icicle")
                     or any(h in t["name"].lower()
@@ -7373,8 +7569,75 @@ def main():
             if t["name"] in _keepers:
                 add_target(t, L_BASE, "wash", _fd, int(_dur_s * 1000), _dim_tail)
                 _n_tail += 1
+        # THE TAIL STILL ANSWERS THE MUSIC. "Then we don't do anything for the
+        # final few chord hits at 2:40." A flat hold to the end is minimal in
+        # the wrong way -- This Version of You has chords at 157.2, 159.9,
+        # 162.0, 163.3, 164.4 and 167.4 after its last drum hit, and the piece
+        # is still playing. The outlines swell gently on each one, so the
+        # ending is quiet without being inert.
+        _tail_ch = ([c for c in voices["chord"].in_window(final_dropout,
+                                                          _dur_s)]
+                    if "chord" in voices else [])
+        _thin, _last_c = [], -9.0
+        for _c in _tail_ch:
+            if _c - _last_c >= 1.5:
+                _thin.append(_c)
+                _last_c = _c
+        for _c in _thin:
+            for t in cast:
+                if t["name"] not in _keepers:
+                    continue
+                add_target(t, L_MOTION, "wash", int(_c * 1000),
+                           int(_c * 1000) + 2200, PALETTES["ice"],
+                           extra={"T_TEXTCTRL_Fadein": "0.25",
+                                  "T_TEXTCTRL_Fadeout": "1.80"})
+        if _thin:
+            print(f"Final dropout: {len(_thin)} closing chords still answered "
+                  f"by the outlines")
         print(f"Final dropout: cleared {_cut} effects after "
               f"{final_dropout:.1f}s, {_n_tail} outlines held dim to the end")
+
+    # --- stage one of a double drop: outlines ON, everything else BACK -----
+    # "The first drop should have all the outlines come on or maybe just the
+    # snowflakes and canes or something, and then everything else on the
+    # second drop."
+    #
+    # Adding light to the outlines alone was not enough -- measured at
+    # Harmony's 3:18, stage one read 75 against 68 for the bar before it and
+    # 144 at stage two, i.e. a 10% lift nobody would notice. What makes it a
+    # moment is the CONTRAST: for that beat and a half the outlines are the
+    # show and everything else steps back, which also leaves stage two
+    # somewhere to go.
+    if _stage1_times:
+        _s1_keep = {t["name"] for t in cast
+                    if t["cat"] in ("single_line", "icicle")
+                    or any(h in t["name"].lower()
+                           for h in ("outline", "vertical", "horizontal", "c9",
+                                     "snowflake", "flake", "candy", "cane"))}
+        _n_hushed = 0
+        for _st1 in _stage1_times:
+            a_ms, b_ms = int(_st1 * 1000), int(_st1 * 1000) + 1500
+            for eff in effects:
+                if eff.end_time_ms <= a_ms or eff.start_time_ms >= b_ms:
+                    continue
+                nm = eff.model_name
+                if nm in _s1_keep or nm.split("/")[0] in _s1_keep:
+                    continue
+                if eff.layer == L_SIG:
+                    continue                     # the drop staging itself
+                pal = eff.palette
+                if pal is None:
+                    continue
+                parts = [x for x in (pal.extra_parts or [])
+                         if not x.startswith("C_VALUECURVE_Brightness=")]
+                parts.append(
+                    "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                    "Type=Flat|Min=0.00|Max=400.00|RV=TRUE|Values=0.000:0.06;1.000:0.06")
+                eff.palette = pal.model_copy(update={"extra_parts": parts})
+                _n_hushed += 1
+        if _n_hushed:
+            print(f"Double-drop stage one: hushed {_n_hushed} effects so the "
+                  f"outlines carry it")
 
     # --- flood discipline -------------------------------------------------
     # "Across songs we're using the floods too much and strobing or pulsing
@@ -7393,6 +7656,15 @@ def main():
     _floods = [n for n in {e.model_name for e in effects} if "flood" in n.lower()]
     if _floods:
         _beat_ms = 60000.0 / max(SONG_TEMPO, 1.0)
+        # "Very high energy" has to be measured PER SONG. energy_level is not
+        # comparable between tracks -- Aperture's median section reads 0.94
+        # against Gooey's 0.48 -- so an absolute 0.75 meant "most of the song"
+        # on one and "a third of it" on the other, and Aperture lost only 4
+        # flood flashes while keeping 367. The top fifth of a song's own
+        # sections is what "climax" means here.
+        _sec_es = sorted(sec.energy_level for sec in analysis.sections)
+        _flood_climax_floor = (_sec_es[int(len(_sec_es) * 0.80)]
+                               if _sec_es else 1.0)
         _amb_spans = [(a["t0"], a["t1"]) for a in ambient_passages]
         _kept, _cut_fast, _cut_quiet = [], 0, 0
         _last: dict[str, int] = {}
@@ -7405,6 +7677,22 @@ def main():
             slow_wash = dur >= 1500 or float(
                 (eff.settings or {}).get("T_TEXTCTRL_Fadeout", 0) or 0) >= 1.0
             in_quiet = any(a <= eff.start_time_ms / 1000.0 < b for a, b in _amb_spans)
+            # SLOW AND GENTLE EVERYWHERE EXCEPT A REAL CLIMAX. "The floods do
+            # a lot of flashing and strobing, no songs should do that, the
+            # floods are to be used sparingly and gently except for very high
+            # energy climax moments."
+            #
+            # The previous rules -- no faster than a quarter note, no flashing
+            # in quiet passages -- were far too permissive: Aperture still
+            # carried 367 flood effects under 1.2s, Harmony 159. A flood only
+            # gets to flash where the music is at its most intense; anywhere
+            # else it washes or it does not appear.
+            _sec_e = next((sec.energy_level for sec in analysis.sections
+                           if sec.start_time <= eff.start_time_ms / 1000.0
+                           < sec.end_time), 0.0)
+            if not slow_wash and _sec_e < _flood_climax_floor:
+                _cut_quiet += 1
+                continue
             if in_quiet and not slow_wash:
                 _cut_quiet += 1
                 continue
@@ -7414,10 +7702,29 @@ def main():
             if not slow_wash:
                 _last[nm] = eff.start_time_ms
             _kept.append(eff)
+        # ...and a hard ceiling on flood FLASHES for the whole song. On a
+        # dense track a fifth of the sections is still a lot of climax --
+        # Aperture kept 258 short flood effects even after the per-section
+        # gate. "Sparingly" has to mean a countable number, so the flashes are
+        # thinned to an even spread across the song and the rest dropped.
+        _FLOOD_FLASH_CAP = 48
+        _fl_short = [e for e in _kept
+                     if "flood" in e.model_name.lower()
+                     and e.end_time_ms - e.start_time_ms < 1200]
+        if len(_fl_short) > _FLOOD_FLASH_CAP:
+            _fl_short.sort(key=lambda e: e.start_time_ms)
+            _step = len(_fl_short) / _FLOOD_FLASH_CAP
+            _keep_ids = {id(_fl_short[int(i * _step)])
+                         for i in range(_FLOOD_FLASH_CAP)}
+            _before = len(_kept)
+            _kept = [e for e in _kept
+                     if id(e) in _keep_ids or e not in _fl_short]
+            _cut_quiet += _before - len(_kept)
         effects = _kept
         if _cut_fast or _cut_quiet:
             print(f"Floods: dropped {_cut_fast} faster than a quarter note, "
-                  f"{_cut_quiet} flashing in quiet passages")
+                  f"{_cut_quiet} others (quiet passages, or over the "
+                  f"{_FLOOD_FLASH_CAP}-flash ceiling)")
 
     # --- flash-rate cap, per prop ----------------------------------------
     # "There are a few points where we flash/pulse the matrices too fast, and
