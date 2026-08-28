@@ -4979,6 +4979,23 @@ def main():
 
     n_amb = 0
     _ambient_ids: set[int] = set()
+    # Tagging that SURVIVES clip_for_blackout. That pass rebuilds effects with
+    # model_copy, so every id()-based tag is silently lost halfway through the
+    # pipeline -- which is how the ambient displacement filter came to delete
+    # the very 37-second hold it existed to protect. `settings` is carried
+    # through the copy, so the tag lives there. xLights ignores unknown keys
+    # (X_Effect_Locked is a real one), so this costs nothing in the file.
+    AMB_TAG = "X_AmbientHold"
+
+    def tag_ambient(new_effects):
+        for _e in new_effects:
+            _e.settings = {**_e.settings, AMB_TAG: "1"}
+            _ambient_ids.add(id(_e))
+
+    def is_ambient_eff(_e) -> bool:
+        return _e.settings.get(AMB_TAG) == "1" or id(_e) in _ambient_ids
+
+
     if ambient_passages:
         _rms = np.asarray(analysis.spectrum.rms_energy)
         _rt = np.asarray(analysis.spectrum.rms_times)
@@ -5128,8 +5145,7 @@ def main():
                                           depth=0.70 + 0.50 * loud)
                     _n0 = len(effects)
                     add_target(tgt, L_BASE, _k, a_ms, b_ms, p_)
-                    for _e2 in effects[_n0:]:
-                        _ambient_ids.add(id(_e2))
+                    tag_ambient(effects[_n0:])
                     n_amb += 1
             # (b) THE SINGLE HITS ARE THE DRAMA, so they get the whole house.
             #
@@ -5158,8 +5174,7 @@ def main():
                         add_target(tgt, L_MOTION, "wash", ms, ms + 2600, pal,
                                    extra={"T_TEXTCTRL_Fadein": "0.05",
                                           "T_TEXTCTRL_Fadeout": "2.10"})
-                        for _e2 in effects[_n0:]:
-                            _ambient_ids.add(id(_e2))
+                        tag_ambient(effects[_n0:])
                         n_amb += 1
                     # ...and a shockwave crossing the big canvases under it
                     # The canvases SWELL, they do not sweep. A travelling
@@ -5176,8 +5191,7 @@ def main():
                         add_target(tgt, L_MOTION, "wash", ms, ms + 2400, pal,
                                    extra={"T_TEXTCTRL_Fadein": "0.06",
                                           "T_TEXTCTRL_Fadeout": "2.00"})
-                        for _e2 in effects[_n0:]:
-                            _ambient_ids.add(id(_e2))
+                        tag_ambient(effects[_n0:])
                         n_amb += 1
                     n_big_hits += 1
                 elif amb_cycle:
@@ -5205,8 +5219,7 @@ def main():
                         add_target(tgt, L_MOTION, "wash", ms, ms + hold, fam_pal,
                                    extra={"T_TEXTCTRL_Fadein": "0.25",
                                           "T_TEXTCTRL_Fadeout": f"{hold / 1000.0 * 0.8:.2f}"})
-                        for _e2 in effects[_n0:]:
-                            _ambient_ids.add(id(_e2))
+                        tag_ambient(effects[_n0:])
                         n_amb += 1
             # (c) an entrance gets a wider reveal -- several props at once,
             #     held long. This is the moment the passage is "about".
@@ -5218,8 +5231,7 @@ def main():
                                int(t0 * 1000) + 3200, pal,
                                extra={"T_TEXTCTRL_Fadein": "0.80",
                                       "T_TEXTCTRL_Fadeout": "2.20"})
-                    for _e2 in effects[_n0:]:
-                        _ambient_ids.add(id(_e2))
+                    tag_ambient(effects[_n0:])
                     n_amb += 1
         print(f"Ambient passages: {len(ambient_passages)} treated as shape, not "
               f"beat ({n_amb} placements, {n_big_hits} full-house hits on "
@@ -7097,7 +7109,14 @@ def main():
     if dip_windows:
         kept = []
         for eff in effects:
-            if id(eff) not in _cycle_ids and eff.layer in (L_BASE, L_MOTION):
+            # Ambient holds are exempt, like cycle holds. The dip trims the
+            # last beat before a section change, which is right for ordinary
+            # ambient fill and catastrophic for a passage-length hold: on This
+            # Version of You it cut the 37-second Herringbone at 1:17 down to
+            # 1.33s, because the song has a section boundary just after it.
+            # That hold IS the passage's content, not fill to be thinned.
+            if (id(eff) not in _cycle_ids and not is_ambient_eff(eff)
+                    and eff.layer in (L_BASE, L_MOTION)):
                 s_s, e_s = eff.start_time_ms / 1000.0, eff.end_time_ms / 1000.0
                 hit_i = next((i for i, (a, b) in enumerate(dip_windows)
                               if s_s < b and e_s > a), None)
@@ -7396,7 +7415,7 @@ def main():
                     + [int(x * 1000) for x in _stage1_times])
         _kept, _cut = [], 0
         for eff in effects:
-            if id(eff) in _ambient_ids or eff.layer not in (L_PULSE, L_SIG):
+            if is_ambient_eff(eff) or eff.layer not in (L_PULSE, L_SIG):
                 _kept.append(eff)
                 continue
             # NO DURATION ESCAPE. The 400ms cutoff let the actual offenders
@@ -7464,7 +7483,7 @@ def main():
         # ambient hold on the same model and layer, that is not itself part of
         # the ambient treatment, is removed.
         _amb_spans = [(e.model_name, e.layer, e.start_time_ms, e.end_time_ms)
-                      for e in _kept if id(e) in _ambient_ids
+                      for e in _kept if is_ambient_eff(e)
                       and e.end_time_ms - e.start_time_ms >= 4000]
         _displaced = 0
         _kept2b = []
@@ -7480,7 +7499,7 @@ def main():
             if eff.end_time_ms - eff.start_time_ms >= 4000:
                 _kept2b.append(eff)
                 continue
-            if id(eff) not in _ambient_ids and any(
+            if not is_ambient_eff(eff) and any(
                     eff.model_name == m and eff.layer == ly
                     and eff.start_time_ms < b and eff.end_time_ms > a
                     for m, ly, a, b in _amb_spans):
@@ -7494,7 +7513,7 @@ def main():
         _kept3 = []
         for eff in _kept:
             pal = eff.palette
-            if (id(eff) not in _ambient_ids and pal is not None and pal.extra_parts
+            if (not is_ambient_eff(eff) and pal is not None and pal.extra_parts
                     and any(x.startswith("C_VALUECURVE_Brightness=")
                             for x in pal.extra_parts)
                     and any(a["t0"] <= eff.start_time_ms / 1000.0 < a["t1"]
@@ -7965,7 +7984,7 @@ def main():
         # this pass would read their peak as a "depth" and replace them with a
         # beat pulse -- the same way it silently destroyed the drop/fade
         # envelope until that was exempted.
-        if id(eff) in _cycle_ids or id(eff) in _ambient_ids:
+        if id(eff) in _cycle_ids or is_ambient_eff(eff):
             continue
         pal = eff.palette
         if pal is None or not pal.extra_parts:
