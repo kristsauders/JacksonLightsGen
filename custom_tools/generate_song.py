@@ -8153,7 +8153,17 @@ def main():
     # those turned out not to be flashes at all -- see the house-bed note in
     # shader_span_test.py.
     _dropped = set()
-    for key, gap in (("sub", _MIN_FLASH_GAP_MS),):
+    # BOTH the submodel and its PARENT PROP.
+    #
+    # "Fence Matrix 2" and "Fence Matrix 2/Horizontals" are different names but
+    # one physical matrix, so capping per name counted eight starts inside
+    # 300ms as eight separate props and let them all through -- measured as a
+    # 10.9 Hz strobe across three matrices in Lose My Cool. The eye sees the
+    # matrix, not the submodel. A parent pass was tried once before and judged
+    # useless, but that was measured when a third of the effects were
+    # rendering black, so the comparison was meaningless.
+    for key, gap in (("sub", _MIN_FLASH_GAP_MS),
+                     ("parent", _MIN_FLASH_GAP_MS)):
         by_prop: dict[str, list] = defaultdict(list)
         for eff in effects:
             if id(eff) in _dropped:
@@ -8174,7 +8184,9 @@ def main():
         _all_starts: dict[str, list[int]] = defaultdict(list)
         for eff in effects:
             if id(eff) not in _dropped:
-                _all_starts[eff.model_name].append(eff.start_time_ms)
+                _all_starts[eff.model_name if key == "sub"
+                            else eff.model_name.split("/")[0]].append(
+                                eff.start_time_ms)
         for nm, evs in by_prop.items():
             g = _FLOOD_FLASH_GAP_MS if "flood" in nm.lower() else gap
             _clusters: list[int] = []
@@ -8497,6 +8509,21 @@ def main():
         _fixed += 1
     print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
           f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
+
+    # Sliver effects. A 30ms effect is one frame at 40fps: it cannot read as a
+    # gesture, only as a glitch, and several landing together are a strobe.
+    # These are not placed deliberately -- they are the residue of passes that
+    # trim and re-clip spans (blackout clipping, run-up dips, section splits)
+    # leaving a stub behind. Measured in Lose My Cool at 155.65s: a 0.03s Off
+    # and a 0.03s Twinkle inside a 10.9 Hz run across three matrices.
+    _SLIVER_MS = 120
+    _slivers = [e for e in effects
+                if e.end_time_ms - e.start_time_ms < _SLIVER_MS]
+    if _slivers:
+        _ids = {id(e) for e in _slivers}
+        effects = [e for e in effects if id(e) not in _ids]
+        print(f"Sliver effects: {len(_slivers)} removed "
+              f"(shorter than {_SLIVER_MS}ms -- one to four frames)")
 
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
