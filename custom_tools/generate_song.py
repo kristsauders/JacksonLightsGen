@@ -1465,6 +1465,24 @@ def beat_pulse_palette(palette: ColorPalette, beat_times: list[float],
     inside = [b for b in beat_times if s - 0.02 <= b <= e]
     if len(inside) < 2:
         return palette
+    # NEVER PULSE FASTER THAN THE FLASH LIMIT.
+    #
+    # A value curve's times are normalised across the effect's own span, so a
+    # curve built for one span and then applied to a shorter one pulses faster
+    # than the beat it was built from. Measured on Harmony: a 7.8s span
+    # carried curve points 78ms apart -- 12.9 Hz -- and the strobe verifier
+    # duly found flicker on the flake and cane props. "No songs should do
+    # that", and floods especially "can give people migraines", so the pulse
+    # rate is capped at the same 240ms the effect-spacing pass uses.
+    _MIN_PULSE_S = 0.24
+    _thin, _last = [], -9.0
+    for _b in inside:
+        if _b - _last >= _MIN_PULSE_S:
+            _thin.append(_b)
+            _last = _b
+    inside = _thin
+    if len(inside) < 2:
+        return palette
     # Thin to the sparsest musical rate that still fits the point cap, so a
     # long span pulses on half notes rather than dropping beats arbitrarily.
     every = 1
@@ -8144,11 +8162,32 @@ def main():
                 nm = (eff.model_name if key == "sub"
                       else eff.model_name.split("/")[0])
                 by_prop[nm].append(eff)
+        # A flash boundary is ANY effect starting on the prop, not just a short
+        # one. Sphere-3 Inner measured an 8 Hz run while every individual gap
+        # passed this cap: three 0.28s hits spaced 380 and 650ms, landing on
+        # top of a Shockwave and a longer On that started moments earlier. The
+        # eye sees the prop change, not which layer changed it.
+        #
+        # Starts within 60ms of each other are ONE flash, not a strobe -- a
+        # drop legitimately lights many layers of a prop at the same instant,
+        # and that reads as a single hit.
+        _all_starts: dict[str, list[int]] = defaultdict(list)
+        for eff in effects:
+            if id(eff) not in _dropped:
+                _all_starts[eff.model_name].append(eff.start_time_ms)
         for nm, evs in by_prop.items():
             g = _FLOOD_FLASH_GAP_MS if "flood" in nm.lower() else gap
+            _clusters: list[int] = []
+            for _t in sorted(_all_starts.get(nm, [])):
+                if not _clusters or _t - _clusters[-1] > 60:
+                    _clusters.append(_t)
             last = -10 ** 9
             for eff in sorted(evs, key=lambda e: e.start_time_ms):
-                if eff.start_time_ms - last < g:
+                # The nearest EARLIER flash on this prop from any layer.
+                _prev = max((c for c in _clusters
+                             if c < eff.start_time_ms - 60), default=-10 ** 9)
+                if (eff.start_time_ms - last < g
+                        or eff.start_time_ms - _prev < g):
                     _dropped.add(id(eff))
                 else:
                     last = eff.start_time_ms
@@ -8403,6 +8442,61 @@ def main():
     print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
           f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
           f"effects on it do not render)")
+
+    # =====================================================================
+    # Pulse-rate ceiling, enforced on the CURVES themselves.
+    #
+    # A value curve's times are normalised across its effect's span, so a curve
+    # built against one span and then applied to a shorter one pulses faster
+    # than the music it came from -- 38 points inside 1.02s on Harmony, which
+    # is a 19 Hz flicker. Several passes build curves and several others resize
+    # effects, so no single one of them can prevent this; it has to be checked
+    # at the end, in real seconds, against the span each curve actually ends up
+    # with.
+    #
+    # "Across songs we're using the floods too much and strobing... no songs
+    # should do that", and on the floods specifically: "it can give people
+    # migraines." 240ms is the same ceiling the effect-spacing pass uses.
+    _MIN_PT_S = 0.24
+    _fixed = 0
+    for _e in effects:
+        _pal = _e.palette
+        if _pal is None or not _pal.extra_parts:
+            continue
+        _vc = next((x for x in _pal.extra_parts
+                    if x.startswith("C_VALUECURVE_Brightness=")), None)
+        if _vc is None:
+            continue
+        _m = re.search(r"Values=([0-9.:;]+)", _vc)
+        if not _m:
+            continue
+        _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+        if _dur <= 0:
+            continue
+        try:
+            _pts = [(float(a), float(b)) for a, b in
+                    (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
+        except ValueError:
+            continue
+        if len(_pts) < 3:
+            continue
+        _pts.sort()
+        _keep, _last_t = [_pts[0]], _pts[0][0]
+        for _t, _v in _pts[1:-1]:
+            if (_t - _last_t) * _dur >= _MIN_PT_S:
+                _keep.append((_t, _v))
+                _last_t = _t
+        if (_pts[-1][0] - _last_t) * _dur >= _MIN_PT_S or len(_keep) == 1:
+            _keep.append(_pts[-1])
+        if len(_keep) == len(_pts):
+            continue
+        _new_vc = _vc[:_m.start(1)] + ";".join(
+            f"{t:.3f}:{v:.2f}" for t, v in _keep) + _vc[_m.end(1):]
+        _e.palette = _pal.model_copy(update={"extra_parts": [
+            _new_vc if x is _vc else x for x in _pal.extra_parts]})
+        _fixed += 1
+    print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
+          f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
 
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
