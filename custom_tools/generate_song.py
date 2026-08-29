@@ -8522,6 +8522,46 @@ def main():
     print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
           f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
 
+    # NO SOLID SLAB ON A TEXTURED MATRIX.
+    #
+    # "There is an effect in some songs on the matrices where the bottom half
+    # of the matrix is a mostly solid shape and the upper half has a shader or
+    # something... I don't like that effect so let's remove it."
+    # (The WhatsApp Shakespeare at 0:39.)
+    #
+    # Measured there: every matrix ran a shader on its body while its own
+    # `Horizontals` submodel was filled by a plain `On`, which renders as a
+    # hard-edged solid band across the middle with texture above and below --
+    # one prop showing two unrelated things at once.
+    #
+    # Only a FLAT FILL on the matrix's OWN submodel is removed, and only while
+    # the parent is textured. Chases along those strips still run (they read as
+    # motion along the outline, not as a slab), and the chord accents on the
+    # outline families are Color Wash with fades, so they are untouched -- they
+    # are the thing Krists liked in This Version of You.
+    _tex_spans: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for _e in effects:
+        _n = _e.model_name
+        if "matrix" in _n.lower() and "tunnel" not in _n.lower() and "/" not in _n \
+                and _e.effect_name in ("Shader", "Plasma", "Spirals"):
+            _tex_spans[_n].append((_e.start_time_ms, _e.end_time_ms))
+    _slab = []
+    for _e in effects:
+        _n = _e.model_name
+        if "/" not in _n or _e.effect_name != "On":
+            continue
+        _parent = _n.split("/")[0]
+        if "matrix" not in _parent.lower() or "tunnel" in _parent.lower():
+            continue
+        if any(_e.start_time_ms < _b and _a < _e.end_time_ms
+               for _a, _b in _tex_spans.get(_parent, [])):
+            _slab.append(_e)
+    if _slab:
+        _ids = {id(e) for e in _slab}
+        effects = [e for e in effects if id(e) not in _ids]
+        print(f"Solid-slab guard: {len(_slab)} flat fills removed from matrix "
+              f"submodels that were sitting on a textured parent")
+
     # Sliver effects. A 30ms effect is one frame at 40fps: it cannot read as a
     # gesture, only as a glitch, and several landing together are a strobe.
     # These are not placed deliberately -- they are the residue of passes that
