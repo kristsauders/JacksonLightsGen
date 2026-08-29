@@ -68,18 +68,30 @@ TEST_MODEL = "Garage Roof"
 SLOT_MS = 8000
 # White so the measurement sees the shader's own greyscale output rather than
 # a palette's colour choices. Real use recolours from the song palette.
-WHITE = ColorPalette(colors=["#FFFFFF"], active_colors=[1])
+# A THREE-COLOUR palette, not white. Some shaders carry their rhythm entirely
+# in colour -- the shape holds still and only the hue steps -- and against a
+# white palette those measure as motionless and were reported as broken.
+# Argyle March and Tartan Shift both did, while measuring 0.55 and 0.20 of
+# colour change per half second when rendered against real colours.
+WHITE = ColorPalette(colors=["#FF2D00", "#00A0FF", "#FFE000"],
+                     active_colors=[1, 2, 3])
 
 
 def build(shaders: list[Path], out: Path, media: Path) -> list[Path]:
     effects, used = [], []
-    for i, fs in enumerate(shaders):
+    for fs in shaders:
         try:
             settings = shader_settings(fs, speed=400)
         except (ShaderUnusable, ValueError) as e:
             print(f"  skip {fs.stem}: {e}")
             continue
-        s = i * SLOT_MS
+        # Slot by position in `used`, NOT by position in `shaders`. Any skipped
+        # file used to shift every later effect into a time slot that measure()
+        # would not look at, so every shader after the first skip measured as
+        # black. Latent until macOS wrote AppleDouble "._" files onto the show
+        # volume and 72 of them started being skipped -- at which point the
+        # whole suite reported 0/60 and the shaders themselves were fine.
+        s = len(used) * SLOT_MS
         effects.append(EffectPlacement(
             model_name=TEST_MODEL, layer=0, effect_name="Shader",
             start_time_ms=s, end_time_ms=s + SLOT_MS - 200,
@@ -96,7 +108,8 @@ def build(shaders: list[Path], out: Path, media: Path) -> list[Path]:
 def measure(fseq: Path, used: list[Path]) -> list[dict]:
     f = read_fseq(fseq, frame_stride=1)
     rng = channel_map.build()["models"][TEST_MODEL]
-    lo, hi = rng["first"], rng["last"] + 1
+    # channel_map reports 1-based channel numbers; frames are 0-based.
+    lo, hi = rng["first"] - 1, rng["last"]
 
     def frame_at(ms: float) -> np.ndarray:
         idx = min(int(ms / f.step_time_ms), len(f) - 1)
@@ -109,6 +122,16 @@ def measure(fseq: Path, used: list[Path]) -> list[dict]:
         samples = [frame_at(base + off) for off in (1200, 2700, 4200, 5700)]
         lit = float(np.mean([(s > 12).mean() for s in samples]))
         var = float(np.mean([s.std() for s in samples])) / 255.0
+        # Colour motion: how much the RGB MIX moves, independent of how much
+        # light there is. A shader whose lozenges never move but whose colour
+        # marches scores ~0 on `motion` and high here.
+        def _mix(ms):
+            px = frame_at(ms)
+            px = px[:len(px) // 3 * 3].reshape(-1, 3).mean(0)
+            tot = px.sum()
+            return px / tot if tot > 1 else px * 0.0
+        cmotion = float(np.mean([np.abs(_mix(base + o + 500) - _mix(base + o)).sum()
+                                 for o in (0, 1500, 3000)]))
         motion = float(np.mean([np.abs(frame_at(base + o + 500) - frame_at(base + o)).mean()
                                 for o in (1200, 2700, 4200)])) / 255.0
         # 1.5s of consecutive frames, tracking whole-panel mean brightness.
@@ -123,18 +146,22 @@ def measure(fseq: Path, used: list[Path]) -> list[dict]:
             why.append("washed out")
         if var < 0.03:
             why.append("flat, no texture")
-        if motion < 0.004:
+        if motion < 0.004 and cmotion < 0.02:
             why.append("still, rate does nothing")
         if flick > 0.06:
             why.append("STROBES the whole panel")
         rows.append({"name": fs.stem, "lit": lit, "var": var,
-                     "motion": motion, "flick": flick, "why": why})
+                     "motion": motion, "cmot": cmotion,
+                     "flick": flick, "why": why})
     return rows
 
 
 def main() -> None:
     wanted = sys.argv[1:]
-    shaders = sorted(SHADER_DIR.glob("*.fs"))
+    # "._" files are macOS AppleDouble resource forks, not shaders. The show
+    # volume is not HFS, so macOS writes one beside every file it touches.
+    shaders = sorted(p for p in SHADER_DIR.glob("*.fs")
+                     if not p.name.startswith("._"))
     if wanted:
         shaders = [p for p in shaders if p.stem in wanted]
         missing = set(wanted) - {p.stem for p in shaders}
@@ -152,13 +179,14 @@ def main() -> None:
         print("render produced no fseq")
         return
     rows = measure(fseq, used)
-    print(f"\n{'shader':22} {'lit':>6} {'var':>6} {'motion':>7} {'flick':>7}  verdict")
+    print(f"\n{'shader':22} {'lit':>6} {'var':>6} {'motion':>7} {'cmot':>6} "
+          f"{'flick':>7}  verdict")
     bad = 0
     for r in sorted(rows, key=lambda r: (not r["why"], r["name"])):
         verdict = "ok" if not r["why"] else "; ".join(r["why"])
         bad += 1 if r["why"] else 0
         print(f"{r['name'][:22]:22} {r['lit']:6.2f} {r['var']:6.3f} "
-              f"{r['motion']:7.4f} {r['flick']:7.4f}  {verdict}")
+              f"{r['motion']:7.4f} {r['cmot']:6.3f} {r['flick']:7.4f}  {verdict}")
     print(f"\n{len(rows) - bad}/{len(rows)} pass")
 
 

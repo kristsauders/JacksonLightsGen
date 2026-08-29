@@ -395,9 +395,8 @@ EFFECTS: dict[str, tuple[str, dict]] = {
 # which reported "24 assembled, 24 ok, 0 fail" -- so a shader rendering wrong
 # is a parameter/authoring problem, never a compile problem, on this machine.
 SHADER_PICKS = [
-    "Wisps", "Metablob Starz", "InnerDimensionalMatrix", "Spirograph Spectrum",
-    "Hex Vortex", "Mobius Spiral", "Spacels",
-    "SearchingForSomething", "Hex 3D Spiral",
+    "Wisps", "Metablob Starz", "InnerDimensionalMatrix",
+    "Hex Vortex", "Mobius Spiral", "Spacels", "Hex 3D Spiral",
     # Written for this show (2026-08-11) to fill real gaps in the vocabulary
     # rather than add more of what was already there -- "I think we also need
     # to build more shaders or other effects." Every stock pick above is some
@@ -542,6 +541,40 @@ SHADER_PICKS = [
     # can only check ISF-declared colour inputs, it cannot detect a shader
     # that hardcodes colour in its GLSL body with no ISF hook whatsoever.
     # Excluded like Fly Through/Vortex-V2/Circle Tunnel/Zoom Loop before it.
+    # --- 2026-08-29 batch. Written against what the library still could not do
+    # after 44 shaders: almost everything was either a rotating/radial figure
+    # or a continuous drift, and NOTHING carried rhythm in colour rather than
+    # in movement. "Think about shapes and textures... think about the movement
+    # and color as rhythmic elements as well."
+    #
+    #   Argyle March    -- lozenges that never move while their colour marches
+    #                      in steps, one diagonal row at a time. Rhythm with
+    #                      zero motion, so it is safe on the biggest props.
+    #   Tartan Shift    -- warp and weft with an overcheck; the whole sett
+    #                      steps to the next shade while the weave holds still.
+    #   Sequin Flip     -- thousands of discs each turning on their own
+    #                      schedule: a steady glitter made of tiny events
+    #                      rather than one big one.
+    #   Crackle Glaze   -- craquelure in a ceramic glaze, with a sheen
+    #                      travelling through a structure that stays put.
+    #   Chromatophore   -- cephalopod skin; cells open and close in a
+    #                      travelling wave and the COLOUR is the pulse.
+    #   Caustic Pool    -- concentrated liquid filaments with dark between,
+    #                      a brightness distribution nothing else here has.
+    #   Halftone Pulse  -- a print screen whose dot weight swells across the
+    #                      prop. Quantised time was tried first and the smoke
+    #                      test caught it strobing the whole panel; the swell
+    #                      travels instead.
+    #   Ribbon Braid    -- three ribbons with real over/under occlusion, so a
+    #                      linear prop gets depth instead of another chase.
+    #   Zoetrope Slats  -- a hidden pattern revealed in moving strips; the
+    #                      pattern never travels, only the opening does.
+    #   Moire Rings     -- fine fast rings whose interference figure is huge
+    #                      and slow, giving a big prop large readable movement
+    #                      out of small detail.
+    "Argyle March", "Tartan Shift", "Sequin Flip", "Crackle Glaze",
+    "Chromatophore", "Caustic Pool", "Halftone Pulse", "Ribbon Braid",
+    "Zoetrope Slats", "Moire Rings",
 ]
 
 
