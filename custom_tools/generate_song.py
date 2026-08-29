@@ -3038,6 +3038,18 @@ def main():
         # slab of colour.
         if target.get("name") in CONE_SHAPED and key in FLAT_KEYS:
             key = "chase_mid_out"
+        # NO PLASMA ON MATRICES. "I don't like the plasma effect so let's
+        # remove that completely from the matrices." Guarded here rather than
+        # by editing the pools, because plasma_organic reaches a matrix from
+        # several directions -- SAFE_LARGE, SAFE_LARGE_WEIGHTED, the matrix
+        # branch of the escalation roll, and the shader fallbacks -- and a
+        # pool edit would leave whichever path was missed still placing it.
+        # It stays available to cones, trees and curtains, where it wraps
+        # rather than mottles.
+        if key == "plasma_organic" and (
+                target.get("cat") == "matrix"
+                or "matrix" in target.get("name", "").lower()):
+            key = SHADER_KEYS[0] if SHADER_KEYS else "chase_mid_out"
         """Place on the target's own name, UNLESS it's synthetic (not a real
         xLights model/group -- see build_cast's leftover-prefix step), in
         which case broadcast to every member individually so nothing ends up
