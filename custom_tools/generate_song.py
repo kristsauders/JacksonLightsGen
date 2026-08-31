@@ -394,8 +394,7 @@ EFFECTS: dict[str, tuple[str, dict]] = {
 #         -s "<show>/Shaders" --shadertranslate
 # which reported "24 assembled, 24 ok, 0 fail" -- so a shader rendering wrong
 # is a parameter/authoring problem, never a compile problem, on this machine.
-SHADER_PICKS = [
-    "Wisps", "Metablob Starz", "InnerDimensionalMatrix",
+SHADER_PICKS = [ "Metablob Starz", "InnerDimensionalMatrix",
     "Hex Vortex", "Mobius Spiral", "Spacels", "Hex 3D Spiral",
     # Written for this show (2026-08-11) to fill real gaps in the vocabulary
     # rather than add more of what was already there -- "I think we also need
@@ -581,6 +580,10 @@ SHADER_PICKS = [
     # asked twice to remove (The WhatsApp Shakespeare 0:39 and 1:55). The
     # earlier split test missed it because it compared half-MEANS, and a band
     # in the middle leaves both halves equal.
+    # NOT "Wisps": the smoke test reports "still, rate does nothing" -- it
+    # renders a texture but never animates, so a canvas holding it for a whole
+    # section is a static picture. Same reason as the black and strobing picks
+    # removed above.
 ]
 
 
@@ -8567,6 +8570,158 @@ def main():
     print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
           f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
           f"effects on it do not render)")
+
+    # BIG CANVASES ARE NEVER LEFT BARE.
+    #
+    # "At 2:11 much of the house is just blue, it's a bit too much and too
+    # simple, something might be missing... at 2:39-2:46 the matrices are all
+    # just blue." Measured on The WhatsApp Shakespeare: every large canvas --
+    # all seven matrices, the Mega Tree and the Garage Roof -- had a 44 SECOND
+    # stretch carrying no effect of its own, relying entirely on the
+    # whole-house spanning shader. A span gives each prop a small crop of one
+    # canvas, and a crop of a slow field is nearly featureless, so the props
+    # render as flat colour.
+    #
+    # This is not new -- the same hole is in builds from before this round --
+    # but it only became visible once the brightness-curve fix made everything
+    # actually render.
+    #
+    # One shader per hole, shared by every canvas in it, so they still read as
+    # doing the same thing.
+    # Two thresholds. A canvas bare for more than 6s is filled outright; a
+    # shorter gap is filled only when most of the OTHER big canvases are
+    # textured at that moment, because a matrix sitting flat while its
+    # neighbours have texture is the thing Krists flagged separately -- "I
+    # thought we made it so the matrices generally did the same thing".
+    _BARE_MIN_S = 3.0
+    _BARE_ALONE_S = 6.0
+    # Defined by WHAT THE PROP IS, not by the `large` flag. That flag missed
+    # the three front window matrices -- which is why they stayed flat at 2:42
+    # while every other canvas showed Fracture -- and included Floods and Orbs,
+    # single-pixel props that cannot hold a texture at all.
+    # Synthetic groups are INCLUDED. "Front Window Matrices" is synthetic --
+    # a pseudo-group that add_target broadcasts to its members -- and skipping
+    # it left those three matrices flat at 2:42 while the other four showed
+    # Fracture. Coverage is tracked by the names effects actually land on,
+    # which for a synthetic target are the members, not the group.
+    _big_targets = [t for t in cast
+                    if t["name"] != "ALL Display"
+                    and not _is_flood(t)
+                    and (t.get("cat") == "matrix"
+                         or t["name"] in CONE_SHAPED
+                         # "matri" not "matrix": the three front window
+                         # matrices are addressed through a GROUP called
+                         # "Front Window Matrices", and the plural does not
+                         # contain the singular. That one letter is why they
+                         # stayed flat at 2:42 through two attempted fixes.
+                         or "matri" in t["name"].lower()
+                         or t["name"] == "Garage Roof")]
+    def _covers(t: dict) -> list[str]:
+        return list(t.get("members") or []) if t.get("synthetic") else [t["name"]]
+
+    _big_names = {n for t in _big_targets for n in _covers(t)}
+    _own_by_name: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for _e in effects:
+        if _e.model_name in _big_names:
+            _own_by_name[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
+
+    def _n_textured(ms: int) -> int:
+        return sum(1 for _n, _sp in _own_by_name.items()
+                   if any(a <= ms < b for a, b in _sp))
+
+    _filled = 0
+    _hole_key: dict[int, str] = {}
+    for _t in _big_targets:
+        _mine = set(_covers(_t))
+        _own = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                      if e.model_name in _mine)
+        _merged: list[list[int]] = []
+        for _a, _b in _own:
+            if _merged and _a <= _merged[-1][1]:
+                _merged[-1][1] = max(_merged[-1][1], _b)
+            else:
+                _merged.append([_a, _b])
+        _cursor = int(_merged[0][0]) if _merged else 0
+        _holes = []
+        for _a, _b in _merged:
+            if _a - _cursor >= _BARE_MIN_S * 1000:
+                _holes.append((_cursor, _a))
+            _cursor = max(_cursor, _b)
+        for _h0, _h1 in _holes:
+            if any(_h0 < _wb * 1000 and _wa * 1000 < _h1
+                   for _wa, _wb in blackout_windows):
+                continue
+            if (_h1 - _h0) < _BARE_ALONE_S * 1000 and \
+                    _n_textured((_h0 + _h1) // 2) < len(_big_targets) // 2:
+                continue
+            _si = next((i for i, sec in enumerate(analysis.sections)
+                        if sec.start_time <= _h0 / 1000.0 < sec.end_time), 0)
+            _sm = section_meta[_si] if _si < len(section_meta) else {}
+            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                or PALETTES["ice"]
+            _bucket = _h0 // 4000
+            if _bucket not in _hole_key:
+                _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
+                                      else "wash")
+            add_target(_t, L_BASE, _hole_key[_bucket], _h0, _h1, _pal)
+            _filled += 1
+    if _filled:
+        print(f"Bare-canvas fill: {_filled} stretches longer than "
+              f"{_BARE_MIN_S:.0f}s given the section's own texture "
+              f"(they were showing only the whole-house span)")
+
+    # ...and a second sweep for cohesion, AFTER the fills above, so it sees the
+    # canvas as it will actually render. "I thought we made it so the matrices
+    # generally did the same thing": wherever most big canvases carry a
+    # texture, the rest do too. The gap-based pass alone left the three front
+    # window matrices flat at 2:42 while every other canvas showed Fracture,
+    # because their individual gaps were short and the coverage count it used
+    # was taken before its own fills landed.
+    _cover: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for _e in effects:
+        if _e.model_name in _big_names:
+            _cover[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
+    _step = 500
+    _end_ms = int(_dur_s * 1000)
+    _need: dict[str, list[int]] = defaultdict(list)
+    for _ms in range(0, _end_ms, _step):
+        _lit = {n for n, sp in _cover.items() if any(a <= _ms < b for a, b in sp)}
+        if len(_lit) < 0.6 * len(_big_targets) or not _lit:
+            continue
+        if any(_ms < _wb * 1000 and _wa * 1000 < _ms + _step
+               for _wa, _wb in blackout_windows):
+            continue
+        for _t in _big_targets:
+            if not (_lit & set(_covers(_t))):
+                _need[_t["name"]].append(_ms)
+    _cohered = 0
+    for _t in _big_targets:
+        _slots = _need.get(_t["name"])
+        if not _slots:
+            continue
+        _runs: list[list[int]] = []
+        for _ms in _slots:
+            if _runs and _ms - _runs[-1][1] <= _step:
+                _runs[-1][1] = _ms
+            else:
+                _runs.append([_ms, _ms])
+        for _a, _b in _runs:
+            if _b - _a < 2000:                 # too brief to be a hole
+                continue
+            _si = next((i for i, sec in enumerate(analysis.sections)
+                        if sec.start_time <= _a / 1000.0 < sec.end_time), 0)
+            _sm = section_meta[_si] if _si < len(section_meta) else {}
+            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                or PALETTES["ice"]
+            _bucket = _a // 4000
+            if _bucket not in _hole_key:
+                _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
+                                      else "wash")
+            add_target(_t, L_BASE, _hole_key[_bucket], _a, _b + _step, _pal)
+            _cohered += 1
+    if _cohered:
+        print(f"Canvas cohesion: {_cohered} stretches where one big prop was "
+              f"flat while the rest were textured")
 
     # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
     #
