@@ -136,7 +136,16 @@ def main() -> None:
         # Garage Roof -- and the house bed lands on EVERY prop, so this is the
         # bed's problem specifically. shader_smoke_test.py cannot see it; it
         # measures one large canvas by design.
-        small = [i for i, n in enumerate(props) if cm[n]["count"] <= 400]
+        # EVERY prop, not just the ones under 400 nodes. A "small prop" was
+        # defined by node count, but what matters is how much of the shader's
+        # frame lands on it -- and the show has props with thousands of nodes
+        # packed into a physically small object (GE 7.5 Flake Lotto: 2934). The
+        # bed's fine detail sweeps across those and swings their whole
+        # brightness, which is exactly the flicker this measure exists to
+        # catch, and they were excluded from it. Measured on Too Slow, that
+        # prop flickered under the Cable Knit bed while Cable Knit scored
+        # 0.0275 here and passed.
+        small = list(range(len(props)))
         flick = 0.0
         if small:
             seq = []

@@ -803,6 +803,40 @@ def register_shaders() -> list[str]:
     return keys
 
 
+def _read_source_lines() -> list[str]:
+    try:
+        return Path(__file__).read_text().split("\n")
+    except OSError:
+        return []
+
+
+SOURCE_LINES = _read_source_lines()
+
+
+def _pass_label(lineno: int, lines: list[str]) -> str:
+    """Name the pass that owns a line, by looking backwards for its heading.
+
+    The generator's passes are delimited by ALL-CAPS comment headings and by
+    the `print(f"...")` line each one ends with, so the nearest heading above a
+    call site names it without anyone maintaining a registry.
+    """
+    if not lines or lineno <= 0:
+        return "?"
+    for i in range(min(lineno, len(lines)) - 1, max(0, lineno - 400), -1):
+        t = lines[i].strip()
+        if not t.startswith("#"):
+            continue
+        t = t.lstrip("# ").rstrip()
+        if not t or t.startswith("---") or t.startswith("==="):
+            continue
+        letters = [c for c in t if c.isalpha()]
+        # A heading, not prose: mostly capitals and short.
+        if letters and sum(c.isupper() for c in letters) / len(letters) > 0.7 \
+                and len(t) < 80:
+            return t.rstrip(".")
+    return f"line {lineno}"
+
+
 SHADER_KEYS = register_shaders()
 # The subset safe to span across the whole house -- see the house-bed pass.
 NEW_SHADER_STEMS = ("aurora_curtain", "ripple_grid", "drift_cells", "falling_embers",
@@ -2962,6 +2996,19 @@ def main():
     effects: list[EffectPlacement] = []
     cue_log: list[dict] = []
 
+    def _caller_line() -> int:
+        """Line in this file of the pass that asked for a placement.
+
+        sys._getframe rather than traceback.extract_stack: this runs once per
+        effect, ~10k times a song, and extract_stack builds a whole formatted
+        stack each call.
+        """
+        f = sys._getframe(1)
+        while f is not None and f.f_code.co_name in ("add", "add_target",
+                                                     "_caller_line"):
+            f = f.f_back
+        return f.f_lineno if f is not None else 0
+
     def add(target_name, layer, key, start_ms, end_ms, palette, extra=None):
         # NOTHING BIG FLAT-FLASHES -- enforced HERE, at the one function every
         # placement goes through.
@@ -3026,6 +3073,21 @@ def main():
         # is the part the eye actually notices.
         start_ms = int(round(start_ms / FRAME_MS) * FRAME_MS)
         end_ms = int(round(end_ms / FRAME_MS) * FRAME_MS)
+        # PROVENANCE. Every placement records the line of this file that asked
+        # for it. `add` is the one chokepoint every effect goes through, so one
+        # tag here covers the whole generator, and the marker survives
+        # model_copy (which is why an id()-based scheme did not).
+        #
+        # This exists because the passes interact in ways that are not
+        # predictable by reading them: three separate ordering bugs in one day
+        # (the replacement cut running before the fills that add effects, the
+        # pulse ceiling running before the pass that shortens spans, cohesion
+        # counting coverage from before its own fills), and then six straight
+        # hypotheses about a strobe regression that each measured completely
+        # inert. Guessing does not scale; asking the file does.
+        #
+        # Read it back with custom_tools/explain_moment.py.
+        settings = {**settings, "X_Src": str(_caller_line())}
         effects.append(EffectPlacement(
             model_name=target_name, layer=layer, effect_name=name,
             start_time_ms=start_ms,
@@ -8754,68 +8816,6 @@ def main():
         print(f"Floods: {_conv} spatial effects converted to a flat wash "
               f"(a flood is one pixel -- motion on it can only be flicker)")
 
-    # =====================================================================
-    # Pulse-rate ceiling, enforced on the CURVES themselves.
-    #
-    # A value curve's times are normalised across its effect's span, so a curve
-    # built against one span and then applied to a shorter one pulses faster
-    # than the music it came from -- 38 points inside 1.02s on Harmony, which
-    # is a 19 Hz flicker. Several passes build curves and several others resize
-    # effects, so no single one of them can prevent this; it has to be checked
-    # at the end, in real seconds, against the span each curve actually ends up
-    # with.
-    #
-    # "Across songs we're using the floods too much and strobing... no songs
-    # should do that", and on the floods specifically: "it can give people
-    # migraines." 240ms is the same ceiling the effect-spacing pass uses.
-    _MIN_PT_S = 0.24
-    # Floods get the musical limit, not the safety limit. 240ms is four
-    # pulses a second, which is faster than a quarter note on every song in
-    # this show -- fine for a prop with shape, far too fast for a single-pixel
-    # flood that can only express brightness. "The floods would never go
-    # faster than quarter or half notes."
-    _QUARTER_S = 60.0 / max(analysis.beats.tempo, 60.0)
-    _fixed = 0
-    for _e in effects:
-        _pal = _e.palette
-        if _pal is None or not _pal.extra_parts:
-            continue
-        _vc = next((x for x in _pal.extra_parts
-                    if x.startswith("C_VALUECURVE_Brightness=")), None)
-        if _vc is None:
-            continue
-        _m = re.search(r"Values=([0-9.:;]+)", _vc)
-        if not _m:
-            continue
-        _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
-        if _dur <= 0:
-            continue
-        _limit = (max(_MIN_PT_S, _QUARTER_S)
-                  if "flood" in _e.model_name.lower() else _MIN_PT_S)
-        try:
-            _pts = [(float(a), float(b)) for a, b in
-                    (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
-        except ValueError:
-            continue
-        if len(_pts) < 3:
-            continue
-        _pts.sort()
-        _keep, _last_t = [_pts[0]], _pts[0][0]
-        for _t, _v in _pts[1:-1]:
-            if (_t - _last_t) * _dur >= _limit:
-                _keep.append((_t, _v))
-                _last_t = _t
-        if (_pts[-1][0] - _last_t) * _dur >= _limit or len(_keep) == 1:
-            _keep.append(_pts[-1])
-        if len(_keep) == len(_pts):
-            continue
-        _new_vc = _vc[:_m.start(1)] + ";".join(
-            f"{t:.3f}:{v:.2f}" for t, v in _keep) + _vc[_m.end(1):]
-        _e.palette = _pal.model_copy(update={"extra_parts": [
-            _new_vc if x is _vc else x for x in _pal.extra_parts]})
-        _fixed += 1
-    print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
-          f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
 
     # NO SOLID SLAB ON A TEXTURED MATRIX.
     #
@@ -8971,6 +8971,76 @@ def main():
           f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
           f"effects on it do not render)")
 
+    # The ceiling runs LAST, after the replacement cut and the overlap pass,
+    # because those SHORTEN spans -- and a value curve's times are normalised
+    # across its effect's own span, so shortening one compresses its curve.
+    # Measured on Too Slow: the replacement cut took the Cable Knit house bed
+    # from 11.5s to 4.0s, compressing its pulse by 2.9x, and the strobe count
+    # went from 16 runs to 87 -- on props whose ONLY effect was that bed.
+
+    # =====================================================================
+    # Pulse-rate ceiling, enforced on the CURVES themselves.
+    #
+    # A value curve's times are normalised across its effect's span, so a curve
+    # built against one span and then applied to a shorter one pulses faster
+    # than the music it came from -- 38 points inside 1.02s on Harmony, which
+    # is a 19 Hz flicker. Several passes build curves and several others resize
+    # effects, so no single one of them can prevent this; it has to be checked
+    # at the end, in real seconds, against the span each curve actually ends up
+    # with.
+    #
+    # "Across songs we're using the floods too much and strobing... no songs
+    # should do that", and on the floods specifically: "it can give people
+    # migraines." 240ms is the same ceiling the effect-spacing pass uses.
+    _MIN_PT_S = 0.24
+    # Floods get the musical limit, not the safety limit. 240ms is four
+    # pulses a second, which is faster than a quarter note on every song in
+    # this show -- fine for a prop with shape, far too fast for a single-pixel
+    # flood that can only express brightness. "The floods would never go
+    # faster than quarter or half notes."
+    _QUARTER_S = 60.0 / max(analysis.beats.tempo, 60.0)
+    _fixed = 0
+    for _e in effects:
+        _pal = _e.palette
+        if _pal is None or not _pal.extra_parts:
+            continue
+        _vc = next((x for x in _pal.extra_parts
+                    if x.startswith("C_VALUECURVE_Brightness=")), None)
+        if _vc is None:
+            continue
+        _m = re.search(r"Values=([0-9.:;]+)", _vc)
+        if not _m:
+            continue
+        _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+        if _dur <= 0:
+            continue
+        _limit = (max(_MIN_PT_S, _QUARTER_S)
+                  if "flood" in _e.model_name.lower() else _MIN_PT_S)
+        try:
+            _pts = [(float(a), float(b)) for a, b in
+                    (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
+        except ValueError:
+            continue
+        if len(_pts) < 3:
+            continue
+        _pts.sort()
+        _keep, _last_t = [_pts[0]], _pts[0][0]
+        for _t, _v in _pts[1:-1]:
+            if (_t - _last_t) * _dur >= _limit:
+                _keep.append((_t, _v))
+                _last_t = _t
+        if (_pts[-1][0] - _last_t) * _dur >= _limit or len(_keep) == 1:
+            _keep.append(_pts[-1])
+        if len(_keep) == len(_pts):
+            continue
+        _new_vc = _vc[:_m.start(1)] + ";".join(
+            f"{t:.3f}:{v:.2f}" for t, v in _keep) + _vc[_m.end(1):]
+        _e.palette = _pal.model_copy(update={"extra_parts": [
+            _new_vc if x is _vc else x for x in _pal.extra_parts]})
+        _fixed += 1
+    print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
+          f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
+
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
         effects.extend(e.model_copy(update={"model_name": TUNNEL_MIRROR_DST})
@@ -8981,6 +9051,23 @@ def main():
     # =====================================================================
     # Write
     # =====================================================================
+    # Provenance summary for this build: how many effects each call site
+    # produced, and how many SURVIVED to the file. A pass whose placements all
+    # vanish is the single most common failure mode here and is invisible
+    # otherwise -- see the run-up dip shredding ambient holds, the cohort lock
+    # dragging chord hits off the beat, and the black value curves.
+    try:
+        from collections import Counter as _C
+        _src = _C(int(e.settings.get("X_Src", 0)) for e in effects)
+        _srclines = SOURCE_LINES
+        _prov = {}
+        for _ln, _n in _src.items():
+            _prov[str(_ln)] = {"count": _n, "pass": _pass_label(_ln, _srclines)}
+        (GEN_DIR / "provenance.json").write_text(
+            json.dumps({"total": len(effects), "by_line": _prov}, indent=1))
+    except Exception as _e:                     # never block a build on this
+        print(f"  (provenance summary skipped: {_e})")
+
     spec = SequenceSpec(
         song_title=SONG_NAME, artist="", album="",
         media_file=str(MP3_PATH),
