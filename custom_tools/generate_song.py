@@ -7017,8 +7017,27 @@ def main():
         # a louder bar a second and a half after the drums actually entered at
         # 288.07 -- which is the same error as being early, mirrored. A drop
         # is where the thing STARTS.
-        cands = []
-        for vn in ("kick", "snare"):
+        # Widen ONLY if the near window is empty. 2.0s is right whenever the
+        # band lands promptly after the detected rise -- Gooey's 1:00 drop has
+        # candidates there and snapping to 60.00 is exactly right. But on a
+        # long build there may be nothing for several seconds: This Version of
+        # You's hit is at 77.10 against a detection at 74.37, and with a fixed
+        # 2.0s window the drop could never reach it. Widening unconditionally
+        # fixed that song and pushed Gooey's 1:00 out to 60.67, so the wider
+        # search is a fallback rather than the rule.
+        def _window(span: float) -> list[tuple[float, float]]:
+            out: list[tuple[float, float]] = []
+            for vn in ("kick", "snare"):
+                v = voices.get(vn)
+                if v is None:
+                    continue
+                out += [(float(t_), float(s_))
+                        for t_, s_ in zip(v.onsets, v.strengths)
+                        if dt <= t_ <= dt + span]
+            return out
+
+        cands = _window(2.00) or _window(3.50)
+        for vn in ():
             v = voices.get(vn)
             if v is None:
                 continue
@@ -7027,7 +7046,15 @@ def main():
                       # reports the rise, so the true hit is always at or
                       # after it, and allowing a backward snap put 1:23 at
                       # 83.51 when the drums enter at 83.80.
-                      if dt <= t_ <= dt + 2.00]
+                      # 3.5s, not 2.0. The energy detector reports the RISE,
+                      # and on a long build the band can land well after it:
+                      # This Version of You's big hit is at 77.10 while the
+                      # detector fires at 74.37, 2.73s earlier and outside the
+                      # old window, so the drop could never snap to it. Still
+                      # "the first hit above 55% of the window peak", so a
+                      # wider window finds the entry rather than a louder bar
+                      # after it.
+                      if dt <= t_ <= dt + 3.50]
         if not cands:
             return dt
         _mx = max(s_ for _t, s_ in cands)
@@ -7038,8 +7065,10 @@ def main():
         return nb if abs(nb - best_t) <= 0.12 else best_t
 
     _snapped = 0
+    SNAPPED_DROPS: list[float] = []
     for _ev in _drops + _rest:
         _new = _snap_drop(float(_ev["drop_time"]))
+        SNAPPED_DROPS.append(_new)
         if abs(_new - _ev["drop_time"]) > 0.05:
             _snapped += 1
             # A snap of more than half a second means the detector fired on an
@@ -8510,12 +8539,31 @@ def main():
     # 2.3s and 1.8s late. That is far outside the 600ms window the chord and
     # section anchors use, so no amount of tightening those would have caught
     # it; drops need their own, much wider pull.
-    _drop_anchors = sorted({
-        _on_beat(_t) for _k in ("energy_drops", "predrop_cutouts")
-        for _ev in (cues.get(_k) or [])
-        for _t in ((_ev.get("drop_time") or _ev.get("time")),)
-        if _t})
-    _DROP_PULL_S = 2.5
+    # The SNAPPED drop times, not the raw detections. The detector reports the
+    # rise; the pass above already works out where the band actually lands, and
+    # anchoring on the raw time pulled the house bed onto a moment 2.7s before
+    # the hit -- lighting the hush the drop exists to break.
+    # BOTH the raw detection and the snapped hit. They answer different
+    # questions and either can be the moment the eye picks: on Gooey the
+    # detection beat-snaps to 60.00, which is the 1:00 Krists hears, while the
+    # hit-snapper prefers 60.67; on This Version of You the detection is at
+    # 74.37 and only the snapped 77.10 is the actual hit. Offering both lets
+    # each shader change take whichever is nearer, instead of one song's
+    # correct answer overriding the other's.
+    _drop_anchors = sorted({_on_beat(_t) for _t in SNAPPED_DROPS if _t}
+                           | {_on_beat(_t)
+                              for _k in ("energy_drops", "predrop_cutouts")
+                              for _ev in (cues.get(_k) or [])
+                              for _t in ((_ev.get("drop_time")
+                                          or _ev.get("time")),)
+                              if _t})
+    # 3.2s, not 2.5. A shader starting just before a drop lights the hush the
+    # drop is supposed to break, and the hush is most of what makes the hit
+    # land. Measured on This Version of You: the house bed began at 74.58s,
+    # exactly 2.52s before the 77.10s hit -- twenty milliseconds outside the
+    # old window -- and the hit's rise over its own run-up fell from x1.38 to
+    # x1.15. Anything inside about two bars of a drop belongs ON the drop.
+    _DROP_PULL_S = 3.2
 
     def _snap_start(ms: int) -> int:
         """Pull a start onto a drop, else onto the beat grid."""
@@ -8842,7 +8890,25 @@ def main():
         _e.effect_name = "Color Wash"
         _e.settings = {"B_CHOICE_BufferStyle": "Per Model Default",
                        "E_CHECKBOX_ColorWash_HFade": "1",
-                       "T_TEXTCTRL_Fadein": _fi, "T_TEXTCTRL_Fadeout": _fo}
+                       "T_TEXTCTRL_Fadein": _fi, "T_TEXTCTRL_Fadeout": _fo,
+                       "X_Src": _e.settings.get("X_Src", "0")}
+        # KEEP THE LEVEL THE ORIGINAL WOULD HAVE PRODUCED. A shader or
+        # Shockwave on a single-pixel flood lights it for only part of its
+        # span; a flat wash lights it fully for all of it. Converting without
+        # compensating raised the floods -- 23 of the brightest fixtures in the
+        # show -- to full for every span, which lifted the whole-house level
+        # during run-ups and cost the drops their contrast. Measured on This
+        # Version of You: the run-up into the 1:17 hit went from 59.7 to 99.8
+        # and the hit's rise over it fell from x1.38 to x1.15.
+        if _e.palette is not None and not any(
+                x.startswith("C_VALUECURVE_Brightness=")
+                for x in (_e.palette.extra_parts or [])):
+            _e.palette = _e.palette.model_copy(update={
+                "extra_parts": list(_e.palette.extra_parts or []) + [
+                    "C_VALUECURVE_Brightness=Active=TRUE|"
+                    "Id=ID_VALUECURVE_Brightness|Type=Custom|Min=0.00|"
+                    f"Max=400.00|RV=TRUE|Values=0.00:{VC_NOMINAL * 0.55:.2f};"
+                    f"1.00:{VC_NOMINAL * 0.55:.2f}"]})
         _conv += 1
     if _conv:
         print(f"Floods: {_conv} spatial effects converted to a flat wash "
