@@ -3009,6 +3009,33 @@ def main():
             f = f.f_back
         return f.f_lineno if f is not None else 0
 
+    REMOVALS: list[dict] = []
+    GUARD_LOG: list[dict] = []
+
+    def drop_effects(all_effects, doomed_ids, reason):
+        """Remove effects and RECORD what went, and why.
+
+        Provenance answers "which pass placed this". The other half of every
+        inert-fix mystery in this project is "which pass took it away again" --
+        the run-up dip shredding ambient holds, the cohort lock dragging chord
+        hits off the beat, the fills refilling what the final dropout cleared.
+        Routing removals through one place makes that answerable too: each
+        entry records the reason, the count, and which passes had placed the
+        effects being removed.
+        """
+        if not doomed_ids:
+            return all_effects
+        gone = [e for e in all_effects if id(e) in doomed_ids]
+        by_src: Counter = Counter(e.settings.get("X_Src", "0") for e in gone)
+        REMOVALS.append({
+            "reason": reason,
+            "count": len(gone),
+            "from_lines": {k: v for k, v in by_src.most_common(6)},
+            "span": [min((e.start_time_ms for e in gone), default=0) / 1000.0,
+                     max((e.end_time_ms for e in gone), default=0) / 1000.0],
+        })
+        return [e for e in all_effects if id(e) not in doomed_ids]
+
     def add(target_name, layer, key, start_ms, end_ms, palette, extra=None):
         # NOTHING BIG FLAT-FLASHES -- enforced HERE, at the one function every
         # placement goes through.
@@ -8394,7 +8421,7 @@ def main():
                 else:
                     last = eff.start_time_ms
     if _dropped:
-        effects = [e for e in effects if id(e) not in _dropped]
+        effects = drop_effects(effects, _dropped, "flash-rate cap")
     _probe("Flash-rate cap")
     print(f"Flash-rate cap: dropped {len(_dropped)} flashes closer than "
           f"{_MIN_FLASH_GAP_MS}ms on the same prop")
@@ -8666,7 +8693,7 @@ def main():
                     _closed += 1
                 _i += 1
     if _drop:
-        effects = [e for e in effects if id(e) not in _drop]
+        effects = drop_effects(effects, _drop, "shader dwell: stacked or too-short shader")
     print(f"Shader dwell: {_snapped} starts snapped to a chord or section, "
           f"{_stacked} stacked shaders removed, {_merged} short "
           f"spans lengthened or merged, {_closed} gaps closed "
@@ -8675,469 +8702,514 @@ def main():
     _probe("before write")
 
 
-    # A CANVAS MAY BE DARK. IT MAY NOT BE A FLAT WASH OF ONE COLOUR.
-    #
-    # "At 2:11 much of the house is just blue, it's a bit too much and too
-    # simple, something might be missing... at 2:39-2:46 the matrices are all
-    # just blue." Measured on The WhatsApp Shakespeare: every large canvas --
-    # all seven matrices, the Mega Tree and the Garage Roof -- had a 44 SECOND
-    # stretch carrying no effect of its own, relying entirely on the
-    # whole-house spanning shader. A span gives each prop a small crop of one
-    # canvas, and a crop of a slow field is nearly featureless, so the props
-    # render as flat colour.
-    #
-    # This is not new -- the same hole is in builds from before this round --
-    # but it only became visible once the brightness-curve fix made everything
-    # actually render.
-    #
-    # The first version of this filled any canvas carrying no effect of its
-    # own, which was wrong: "canvases can be left bare when in an ambient or
-    # quieter passage or before a drop, but not filled with a single basic
-    # color and nothing else -- the problem was that they were just blue, not
-    # that they were off at some appropriate moments."
-    #
-    # Being dark IS the effect in a hush, and refilling those moments cost
-    # This Version of You most of its shape: the first big drum hit fell from
-    # x1.38 over its run-up to x1.15, and the final dropout -- which clears
-    # everything but the outlines -- went from leaving 30% of the pre-dropout
-    # level to leaving 83%, because this pass ran afterwards and put the
-    # canvases straight back.
-    #
-    # So the trigger is being LIT AND FEATURELESS, not being empty: a canvas
-    # covered by the whole-house span (which hands each prop a near-constant
-    # crop) while having nothing of its own. A canvas covered by nothing at all
-    # is dark on purpose and is left alone.
-    #
-    # One shader per hole, shared by every canvas in it, so they still read as
-    # doing the same thing.
-    # Two thresholds. A canvas bare for more than 6s is filled outright; a
-    # shorter gap is filled only when most of the OTHER big canvases are
-    # textured at that moment, because a matrix sitting flat while its
-    # neighbours have texture is the thing Krists flagged separately -- "I
-    # thought we made it so the matrices generally did the same thing".
-    _BARE_MIN_S = 3.0
-    _BARE_ALONE_S = 6.0
-    # Defined by WHAT THE PROP IS, not by the `large` flag. That flag missed
-    # the three front window matrices -- which is why they stayed flat at 2:42
-    # while every other canvas showed Fracture -- and included Floods and Orbs,
-    # single-pixel props that cannot hold a texture at all.
-    # Synthetic groups are INCLUDED. "Front Window Matrices" is synthetic --
-    # a pseudo-group that add_target broadcasts to its members -- and skipping
-    # it left those three matrices flat at 2:42 while the other four showed
-    # Fracture. Coverage is tracked by the names effects actually land on,
-    # which for a synthetic target are the members, not the group.
-    _big_targets = [t for t in cast
-                    if t["name"] != "ALL Display"
-                    and not _is_flood(t)
-                    and (t.get("cat") == "matrix"
-                         or t["name"] in CONE_SHAPED
-                         # "matri" not "matrix": the three front window
-                         # matrices are addressed through a GROUP called
-                         # "Front Window Matrices", and the plural does not
-                         # contain the singular. That one letter is why they
-                         # stayed flat at 2:42 through two attempted fixes.
-                         or "matri" in t["name"].lower()
-                         or t["name"] == "Garage Roof")]
-    def _covers(t: dict) -> list[str]:
-        return list(t.get("members") or []) if t.get("synthetic") else [t["name"]]
+    def _g_fill_flat_canvases(effects):
+        # A CANVAS MAY BE DARK. IT MAY NOT BE A FLAT WASH OF ONE COLOUR.
+        #
+        # "At 2:11 much of the house is just blue, it's a bit too much and too
+        # simple, something might be missing... at 2:39-2:46 the matrices are all
+        # just blue." Measured on The WhatsApp Shakespeare: every large canvas --
+        # all seven matrices, the Mega Tree and the Garage Roof -- had a 44 SECOND
+        # stretch carrying no effect of its own, relying entirely on the
+        # whole-house spanning shader. A span gives each prop a small crop of one
+        # canvas, and a crop of a slow field is nearly featureless, so the props
+        # render as flat colour.
+        #
+        # This is not new -- the same hole is in builds from before this round --
+        # but it only became visible once the brightness-curve fix made everything
+        # actually render.
+        #
+        # The first version of this filled any canvas carrying no effect of its
+        # own, which was wrong: "canvases can be left bare when in an ambient or
+        # quieter passage or before a drop, but not filled with a single basic
+        # color and nothing else -- the problem was that they were just blue, not
+        # that they were off at some appropriate moments."
+        #
+        # Being dark IS the effect in a hush, and refilling those moments cost
+        # This Version of You most of its shape: the first big drum hit fell from
+        # x1.38 over its run-up to x1.15, and the final dropout -- which clears
+        # everything but the outlines -- went from leaving 30% of the pre-dropout
+        # level to leaving 83%, because this pass ran afterwards and put the
+        # canvases straight back.
+        #
+        # So the trigger is being LIT AND FEATURELESS, not being empty: a canvas
+        # covered by the whole-house span (which hands each prop a near-constant
+        # crop) while having nothing of its own. A canvas covered by nothing at all
+        # is dark on purpose and is left alone.
+        #
+        # One shader per hole, shared by every canvas in it, so they still read as
+        # doing the same thing.
+        # Two thresholds. A canvas bare for more than 6s is filled outright; a
+        # shorter gap is filled only when most of the OTHER big canvases are
+        # textured at that moment, because a matrix sitting flat while its
+        # neighbours have texture is the thing Krists flagged separately -- "I
+        # thought we made it so the matrices generally did the same thing".
+        _BARE_MIN_S = 3.0
+        _BARE_ALONE_S = 6.0
+        # Defined by WHAT THE PROP IS, not by the `large` flag. That flag missed
+        # the three front window matrices -- which is why they stayed flat at 2:42
+        # while every other canvas showed Fracture -- and included Floods and Orbs,
+        # single-pixel props that cannot hold a texture at all.
+        # Synthetic groups are INCLUDED. "Front Window Matrices" is synthetic --
+        # a pseudo-group that add_target broadcasts to its members -- and skipping
+        # it left those three matrices flat at 2:42 while the other four showed
+        # Fracture. Coverage is tracked by the names effects actually land on,
+        # which for a synthetic target are the members, not the group.
+        _big_targets = [t for t in cast
+                        if t["name"] != "ALL Display"
+                        and not _is_flood(t)
+                        and (t.get("cat") == "matrix"
+                             or t["name"] in CONE_SHAPED
+                             # "matri" not "matrix": the three front window
+                             # matrices are addressed through a GROUP called
+                             # "Front Window Matrices", and the plural does not
+                             # contain the singular. That one letter is why they
+                             # stayed flat at 2:42 through two attempted fixes.
+                             or "matri" in t["name"].lower()
+                             or t["name"] == "Garage Roof")]
+        def _covers(t: dict) -> list[str]:
+            return list(t.get("members") or []) if t.get("synthetic") else [t["name"]]
 
-    _big_names = {n for t in _big_targets for n in _covers(t)}
-    _own_by_name: dict[str, list[tuple[int, int]]] = defaultdict(list)
-    for _e in effects:
-        if _e.model_name in _big_names:
-            _own_by_name[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
+        _big_names = {n for t in _big_targets for n in _covers(t)}
+        _own_by_name: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        for _e in effects:
+            if _e.model_name in _big_names:
+                _own_by_name[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
 
-    def _n_textured(ms: int) -> int:
-        return sum(1 for _n, _sp in _own_by_name.items()
-                   if any(a <= ms < b for a, b in _sp))
+        def _n_textured(ms: int) -> int:
+            return sum(1 for _n, _sp in _own_by_name.items()
+                       if any(a <= ms < b for a, b in _sp))
 
-    _span_cover = sorted((e.start_time_ms, e.end_time_ms) for e in effects
-                         if e.model_name == HOUSE_GROUP)
+        _span_cover = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                             if e.model_name == HOUSE_GROUP)
 
-    def _lit_by_span(a: int, b: int) -> bool:
-        """Is this stretch mostly covered by the whole-house span?"""
-        if not _span_cover:
-            return False
-        hit = sum(max(0, min(b, y) - max(a, x)) for x, y in _span_cover)
-        return hit >= 0.6 * max(b - a, 1)
+        def _lit_by_span(a: int, b: int) -> bool:
+            """Is this stretch mostly covered by the whole-house span?"""
+            if not _span_cover:
+                return False
+            hit = sum(max(0, min(b, y) - max(a, x)) for x, y in _span_cover)
+            return hit >= 0.6 * max(b - a, 1)
 
-    _filled = 0
-    _hole_key: dict[int, str] = {}
-    for _t in _big_targets:
-        _mine = set(_covers(_t))
-        _own = sorted((e.start_time_ms, e.end_time_ms) for e in effects
-                      if e.model_name in _mine)
-        _merged: list[list[int]] = []
-        for _a, _b in _own:
-            if _merged and _a <= _merged[-1][1]:
-                _merged[-1][1] = max(_merged[-1][1], _b)
-            else:
-                _merged.append([_a, _b])
-        _cursor = int(_merged[0][0]) if _merged else 0
-        _holes = []
-        for _a, _b in _merged:
-            if _a - _cursor >= _BARE_MIN_S * 1000:
-                _holes.append((_cursor, _a))
-            _cursor = max(_cursor, _b)
-        for _h0, _h1 in _holes:
-            if any(_h0 < _wb * 1000 and _wa * 1000 < _h1
+        _filled = 0
+        _hole_key: dict[int, str] = {}
+        for _t in _big_targets:
+            _mine = set(_covers(_t))
+            _own = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                          if e.model_name in _mine)
+            _merged: list[list[int]] = []
+            for _a, _b in _own:
+                if _merged and _a <= _merged[-1][1]:
+                    _merged[-1][1] = max(_merged[-1][1], _b)
+                else:
+                    _merged.append([_a, _b])
+            _cursor = int(_merged[0][0]) if _merged else 0
+            _holes = []
+            for _a, _b in _merged:
+                if _a - _cursor >= _BARE_MIN_S * 1000:
+                    _holes.append((_cursor, _a))
+                _cursor = max(_cursor, _b)
+            for _h0, _h1 in _holes:
+                if any(_h0 < _wb * 1000 and _wa * 1000 < _h1
+                       for _wa, _wb in blackout_windows):
+                    continue
+                if not _lit_by_span(_h0, _h1):
+                    continue            # dark on purpose -- leave it dark
+                if (_h1 - _h0) < _BARE_ALONE_S * 1000 and \
+                        _n_textured((_h0 + _h1) // 2) < len(_big_targets) // 2:
+                    continue
+                _si = next((i for i, sec in enumerate(analysis.sections)
+                            if sec.start_time <= _h0 / 1000.0 < sec.end_time), 0)
+                _sm = section_meta[_si] if _si < len(section_meta) else {}
+                _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                    or PALETTES["ice"]
+                _bucket = _h0 // 4000
+                if _bucket not in _hole_key:
+                    _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
+                                          else "wash")
+                # The fill runs AFTER the shader-dwell snap, so it has to place
+                # itself on the grid rather than rely on being corrected later.
+                # Measured on Gooey: this pass was the thing putting the 1:00
+                # shader change at 62.27s -- 2.3s past the drop -- while the drop
+                # itself had been snapped correctly everywhere else.
+                _s0 = _snap_start(_h0)
+                if _s0 >= _h1 - 500:
+                    _s0 = _h0
+                add_target(_t, L_BASE, _hole_key[_bucket], _s0, _h1, _pal)
+                _filled += 1
+        if _filled:
+            print(f"Bare-canvas fill: {_filled} stretches longer than "
+                  f"{_BARE_MIN_S:.0f}s given the section's own texture "
+                  f"(they were showing only the whole-house span)")
+
+        # ...and a second sweep for cohesion, AFTER the fills above, so it sees the
+        # canvas as it will actually render. "I thought we made it so the matrices
+        # generally did the same thing": wherever most big canvases carry a
+        # texture, the rest do too. The gap-based pass alone left the three front
+        # window matrices flat at 2:42 while every other canvas showed Fracture,
+        # because their individual gaps were short and the coverage count it used
+        # was taken before its own fills landed.
+        _cover: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        for _e in effects:
+            if _e.model_name in _big_names:
+                _cover[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
+        _step = 500
+        _end_ms = int(_dur_s * 1000)
+        _need: dict[str, list[int]] = defaultdict(list)
+        for _ms in range(0, _end_ms, _step):
+            _lit = {n for n, sp in _cover.items() if any(a <= _ms < b for a, b in sp)}
+            if len(_lit) < 0.6 * len(_big_targets) or not _lit:
+                continue
+            if any(_ms < _wb * 1000 and _wa * 1000 < _ms + _step
                    for _wa, _wb in blackout_windows):
                 continue
-            if not _lit_by_span(_h0, _h1):
-                continue            # dark on purpose -- leave it dark
-            if (_h1 - _h0) < _BARE_ALONE_S * 1000 and \
-                    _n_textured((_h0 + _h1) // 2) < len(_big_targets) // 2:
-                continue
-            _si = next((i for i, sec in enumerate(analysis.sections)
-                        if sec.start_time <= _h0 / 1000.0 < sec.end_time), 0)
-            _sm = section_meta[_si] if _si < len(section_meta) else {}
-            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
-                or PALETTES["ice"]
-            _bucket = _h0 // 4000
-            if _bucket not in _hole_key:
-                _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
-                                      else "wash")
-            # The fill runs AFTER the shader-dwell snap, so it has to place
-            # itself on the grid rather than rely on being corrected later.
-            # Measured on Gooey: this pass was the thing putting the 1:00
-            # shader change at 62.27s -- 2.3s past the drop -- while the drop
-            # itself had been snapped correctly everywhere else.
-            _s0 = _snap_start(_h0)
-            if _s0 >= _h1 - 500:
-                _s0 = _h0
-            add_target(_t, L_BASE, _hole_key[_bucket], _s0, _h1, _pal)
-            _filled += 1
-    if _filled:
-        print(f"Bare-canvas fill: {_filled} stretches longer than "
-              f"{_BARE_MIN_S:.0f}s given the section's own texture "
-              f"(they were showing only the whole-house span)")
-
-    # ...and a second sweep for cohesion, AFTER the fills above, so it sees the
-    # canvas as it will actually render. "I thought we made it so the matrices
-    # generally did the same thing": wherever most big canvases carry a
-    # texture, the rest do too. The gap-based pass alone left the three front
-    # window matrices flat at 2:42 while every other canvas showed Fracture,
-    # because their individual gaps were short and the coverage count it used
-    # was taken before its own fills landed.
-    _cover: dict[str, list[tuple[int, int]]] = defaultdict(list)
-    for _e in effects:
-        if _e.model_name in _big_names:
-            _cover[_e.model_name].append((_e.start_time_ms, _e.end_time_ms))
-    _step = 500
-    _end_ms = int(_dur_s * 1000)
-    _need: dict[str, list[int]] = defaultdict(list)
-    for _ms in range(0, _end_ms, _step):
-        _lit = {n for n, sp in _cover.items() if any(a <= _ms < b for a, b in sp)}
-        if len(_lit) < 0.6 * len(_big_targets) or not _lit:
-            continue
-        if any(_ms < _wb * 1000 and _wa * 1000 < _ms + _step
-               for _wa, _wb in blackout_windows):
-            continue
+            for _t in _big_targets:
+                if not (_lit & set(_covers(_t))):
+                    _need[_t["name"]].append(_ms)
+        _cohered = 0
         for _t in _big_targets:
-            if not (_lit & set(_covers(_t))):
-                _need[_t["name"]].append(_ms)
-    _cohered = 0
-    for _t in _big_targets:
-        _slots = _need.get(_t["name"])
-        if not _slots:
-            continue
-        _runs: list[list[int]] = []
-        for _ms in _slots:
-            if _runs and _ms - _runs[-1][1] <= _step:
-                _runs[-1][1] = _ms
-            else:
-                _runs.append([_ms, _ms])
-        for _a, _b in _runs:
-            if _b - _a < 2000:                 # too brief to be a hole
+            _slots = _need.get(_t["name"])
+            if not _slots:
                 continue
-            if not _lit_by_span(_a, _b + _step):
-                continue
-            _si = next((i for i, sec in enumerate(analysis.sections)
-                        if sec.start_time <= _a / 1000.0 < sec.end_time), 0)
-            _sm = section_meta[_si] if _si < len(section_meta) else {}
-            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
-                or PALETTES["ice"]
-            _bucket = _a // 4000
-            if _bucket not in _hole_key:
-                _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
-                                      else "wash")
-            _a2 = _snap_start(_a)
-            if _a2 >= _b:
-                _a2 = _a
-            add_target(_t, L_BASE, _hole_key[_bucket], _a2, _b + _step, _pal)
-            _cohered += 1
-    if _cohered:
-        print(f"Canvas cohesion: {_cohered} stretches where one big prop was "
-              f"flat while the rest were textured")
-
-    # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
-    #
-    # The substitution in add_target caught the effects that route through it
-    # and missed 181 Shockwaves that several passes place with a direct add().
-    # Rather than chase every caller, this converts whatever is left: a flood
-    # is a single RGB node, so a Shockwave on it is not a ring, it is that
-    # ring's brightness sampled at one point -- flicker.
-    #
-    # Converted rather than dropped, so the flood still marks the moment; it
-    # just marks it by lighting and fading instead of by flickering.
-    _flat_ok = {"On", "Off", "Color Wash"}
-    _conv = 0
-    for _e in effects:
-        if "flood" not in _e.model_name.lower() or _e.effect_name in _flat_ok:
-            continue
-        _fi = _e.settings.get("T_TEXTCTRL_Fadein", "0.10")
-        _fo = _e.settings.get("T_TEXTCTRL_Fadeout", "0.60")
-        _e.effect_name = "Color Wash"
-        _e.settings = {"B_CHOICE_BufferStyle": "Per Model Default",
-                       "E_CHECKBOX_ColorWash_HFade": "1",
-                       "T_TEXTCTRL_Fadein": _fi, "T_TEXTCTRL_Fadeout": _fo,
-                       "X_Src": _e.settings.get("X_Src", "0")}
-        # KEEP THE LEVEL THE ORIGINAL WOULD HAVE PRODUCED. A shader or
-        # Shockwave on a single-pixel flood lights it for only part of its
-        # span; a flat wash lights it fully for all of it. Converting without
-        # compensating raised the floods -- 23 of the brightest fixtures in the
-        # show -- to full for every span, which lifted the whole-house level
-        # during run-ups and cost the drops their contrast. Measured on This
-        # Version of You: the run-up into the 1:17 hit went from 59.7 to 99.8
-        # and the hit's rise over it fell from x1.38 to x1.15.
-        if _e.palette is not None and not any(
-                x.startswith("C_VALUECURVE_Brightness=")
-                for x in (_e.palette.extra_parts or [])):
-            _e.palette = _e.palette.model_copy(update={
-                "extra_parts": list(_e.palette.extra_parts or []) + [
-                    "C_VALUECURVE_Brightness=Active=TRUE|"
-                    "Id=ID_VALUECURVE_Brightness|Type=Custom|Min=0.00|"
-                    f"Max=400.00|RV=TRUE|Values=0.00:{VC_NOMINAL * 0.55:.2f};"
-                    f"1.00:{VC_NOMINAL * 0.55:.2f}"]})
-        _conv += 1
-    if _conv:
-        print(f"Floods: {_conv} spatial effects converted to a flat wash "
-              f"(a flood is one pixel -- motion on it can only be flicker)")
-
-
-    # NO SOLID SLAB ON A TEXTURED MATRIX.
-    #
-    # "There is an effect in some songs on the matrices where the bottom half
-    # of the matrix is a mostly solid shape and the upper half has a shader or
-    # something... I don't like that effect so let's remove it."
-    # (The WhatsApp Shakespeare at 0:39.)
-    #
-    # Measured there: every matrix ran a shader on its body while its own
-    # `Horizontals` submodel was filled by a plain `On`, which renders as a
-    # hard-edged solid band across the middle with texture above and below --
-    # one prop showing two unrelated things at once.
-    #
-    # Only a FLAT FILL on the matrix's OWN submodel is removed, and only while
-    # the parent is textured. Chases along those strips still run (they read as
-    # motion along the outline, not as a slab), and the chord accents on the
-    # outline families are Color Wash with fades, so they are untouched -- they
-    # are the thing Krists liked in This Version of You.
-    _tex_spans: dict[str, list[tuple[int, int]]] = defaultdict(list)
-    for _e in effects:
-        _n = _e.model_name
-        if "matrix" in _n.lower() and "tunnel" not in _n.lower() and "/" not in _n \
-                and _e.effect_name in ("Shader", "Plasma", "Spirals"):
-            _tex_spans[_n].append((_e.start_time_ms, _e.end_time_ms))
-    # FLAT FILLS ONLY. This was briefly broadened to every effect on a matrix
-    # submodel, which was wrong on both counts: it did not fix the band (that
-    # was the Paper Layers shader, see SHADER_PICKS) and it removed movement
-    # that is wanted -- "the single strand chases on outlines is a desired
-    # effect, it gives movement we want".
-    _slab = []
-    for _e in effects:
-        _n = _e.model_name
-        if "/" not in _n or _e.effect_name != "On":
-            continue
-        _parent = _n.split("/")[0]
-        if "matrix" not in _parent.lower() or "tunnel" in _parent.lower():
-            continue
-        if any(_e.start_time_ms < _b and _a < _e.end_time_ms
-               for _a, _b in _tex_spans.get(_parent, [])):
-            _slab.append(_e)
-    if _slab:
-        _ids = {id(e) for e in _slab}
-        effects = [e for e in effects if id(e) not in _ids]
-        print(f"Solid-slab guard: {len(_slab)} flat fills removed from matrix "
-              f"submodels that were sitting on a textured parent")
-
-    # Sliver effects. A 30ms effect is one frame at 40fps: it cannot read as a
-    # gesture, only as a glitch, and several landing together are a strobe.
-    # These are not placed deliberately -- they are the residue of passes that
-    # trim and re-clip spans (blackout clipping, run-up dips, section splits)
-    # leaving a stub behind. Measured in Lose My Cool at 155.65s: a 0.03s Off
-    # and a 0.03s Twinkle inside a 10.9 Hz run across three matrices.
-    _SLIVER_MS = 120
-    _slivers = [e for e in effects
-                if e.end_time_ms - e.start_time_ms < _SLIVER_MS]
-    if _slivers:
-        _ids = {id(e) for e in _slivers}
-        effects = [e for e in effects if id(e) not in _ids]
-        print(f"Sliver effects: {len(_slivers)} removed "
-              f"(shorter than {_SLIVER_MS}ms -- one to four frames)")
-
-    # These two run LAST, after the bare-canvas and cohesion fills, because
-    # those passes ADD effects. Running them earlier meant a shader the fill
-    # placed on a drop never had the outgoing shader cut from under it --
-    # Gooey 3:01, where Circuit Trace started dead on the drop while
-    # Herringbone ran on for another 1.7s -- and meant fill-created effects
-    # never had their same-layer overlaps resolved at all.
-
-    # A SHADER CHANGE ON A DROP IS A REPLACEMENT, NOT AN ADDITION.
-    #
-    # The layer-overlap pass lifts a later effect onto a free layer rather than
-    # truncating the earlier one, which is right for decay tails and wrong for
-    # a shader change: the new shader starts exactly on the drop while the old
-    # one keeps running underneath, so the two blend and the change reads as
-    # late even though it began on time. Measured on Gooey at 3:01: Circuit
-    # Trace started dead on the drop at 181.37 while Herringbone ran on until
-    # 183.10 -- 1.7s of both at once.
-    _cut_late = 0
-    _anchor_set = sorted(set(_drop_anchors)
-                         | {_on_beat(sec.start_time) for sec in analysis.sections})
-    _prop_sh: dict[str, list] = {}
-    for _e in effects:
-        if _e.effect_name == "Shader":
-            _prop_sh.setdefault(_e.model_name, []).append(_e)
-    for _row in _prop_sh.values():
-        _row.sort(key=lambda e: e.start_time_ms)
-        for _i, _new in enumerate(_row):
-            # NOT `_bt` -- that name holds the beat-times array this whole
-            # block closes over, and reusing it here silently replaced the
-            # array with a float.
-            _nstart = _new.start_time_ms / 1000.0
-            if not any(abs(_nstart - _a) <= 0.06 for _a in _anchor_set):
-                continue
-            for _old in _row[:_i]:
-                if _old.end_time_ms > _new.start_time_ms \
-                        and _old.start_time_ms < _new.start_time_ms:
-                    _old.end_time_ms = _new.start_time_ms
-                    _cut_late += 1
-    if _cut_late:
-        print(f"Shader replacement: {_cut_late} outgoing shaders cut at the "
-              f"drop or section change instead of running on underneath")
-
-    # =====================================================================
-    # Same-layer overlap resolution -- MUST be last, after every pass that
-    # can move or lengthen an effect.
-    #
-    # An xLights EffectLayer is a single timeline: two effects cannot occupy
-    # the same milliseconds on it. 21% of the effects in this song were doing
-    # exactly that, because a dozen passes each place effects independently
-    # and none of them could see the others. The chord gestures were the
-    # clearest casualty -- three washes on Corner Verticals L1 at 26.43-29.02,
-    # 27.23-29.82 and 28.85-31.45, each correct on its own, together
-    # unrenderable, which is why those props measured DARK in the .fseq while
-    # the .xsq looked right. This is almost certainly why several rounds of
-    # fixes have measured inert: the change was real in the file and never
-    # reached the pixels.
-    #
-    # Resolution moves the LATER effect up a layer, which is both what the eye
-    # expects (the newer event paints over the older) and what preserves the
-    # long decay tails that make a chord ring. Truncation is the fallback for
-    # when there is genuinely no free layer.
-    _MAX_LAYER = 12
-    _lanes: dict[tuple[str, int], list] = {}
-    for _e in effects:
-        _lanes.setdefault((_e.model_name, _e.layer), []).append(_e)
-    _moved = _cut = 0
-    _busy = {k: sorted((e.start_time_ms, e.end_time_ms) for e in v)
-             for k, v in _lanes.items()}
-    for (_mn, _lay), _row in sorted(_lanes.items()):
-        _row.sort(key=lambda e: (e.start_time_ms, e.end_time_ms))
-        _end = None
-        for _e in _row:
-            if _end is not None and _e.start_time_ms < _end:
-                _dest = None
-                for _l2 in range(_lay + 1, _MAX_LAYER):
-                    _occ = _busy.get((_mn, _l2), [])
-                    if not any(_e.start_time_ms < _b and _a < _e.end_time_ms
-                               for _a, _b in _occ):
-                        _dest = _l2
-                        break
-                if _dest is not None:
-                    _busy.setdefault((_mn, _dest), []).append(
-                        (_e.start_time_ms, _e.end_time_ms))
-                    _e.layer = _dest
-                    _moved += 1
+            _runs: list[list[int]] = []
+            for _ms in _slots:
+                if _runs and _ms - _runs[-1][1] <= _step:
+                    _runs[-1][1] = _ms
+                else:
+                    _runs.append([_ms, _ms])
+            for _a, _b in _runs:
+                if _b - _a < 2000:                 # too brief to be a hole
                     continue
-                _e.start_time_ms = _end
-                _cut += 1
-                if _e.end_time_ms - _e.start_time_ms < 200:
-                    _e.end_time_ms = _e.start_time_ms + 200
-            _end = max(_end or 0, _e.end_time_ms)
-    print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
-          f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
-          f"effects on it do not render)")
+                if not _lit_by_span(_a, _b + _step):
+                    continue
+                _si = next((i for i, sec in enumerate(analysis.sections)
+                            if sec.start_time <= _a / 1000.0 < sec.end_time), 0)
+                _sm = section_meta[_si] if _si < len(section_meta) else {}
+                _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                    or PALETTES["ice"]
+                _bucket = _a // 4000
+                if _bucket not in _hole_key:
+                    _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
+                                          else "wash")
+                _a2 = _snap_start(_a)
+                if _a2 >= _b:
+                    _a2 = _a
+                add_target(_t, L_BASE, _hole_key[_bucket], _a2, _b + _step, _pal)
+                _cohered += 1
+        if _cohered:
+            print(f"Canvas cohesion: {_cohered} stretches where one big prop was "
+                  f"flat while the rest were textured")
+        return effects
 
-    # The ceiling runs LAST, after the replacement cut and the overlap pass,
-    # because those SHORTEN spans -- and a value curve's times are normalised
-    # across its effect's own span, so shortening one compresses its curve.
-    # Measured on Too Slow: the replacement cut took the Cable Knit house bed
-    # from 11.5s to 4.0s, compressing its pulse by 2.9x, and the strobe count
-    # went from 16 runs to 87 -- on props whose ONLY effect was that bed.
+    def _g_floods_flat(effects):
+        # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
+        #
+        # The substitution in add_target caught the effects that route through it
+        # and missed 181 Shockwaves that several passes place with a direct add().
+        # Rather than chase every caller, this converts whatever is left: a flood
+        # is a single RGB node, so a Shockwave on it is not a ring, it is that
+        # ring's brightness sampled at one point -- flicker.
+        #
+        # Converted rather than dropped, so the flood still marks the moment; it
+        # just marks it by lighting and fading instead of by flickering.
+        _flat_ok = {"On", "Off", "Color Wash"}
+        _conv = 0
+        for _e in effects:
+            if "flood" not in _e.model_name.lower() or _e.effect_name in _flat_ok:
+                continue
+            _fi = _e.settings.get("T_TEXTCTRL_Fadein", "0.10")
+            _fo = _e.settings.get("T_TEXTCTRL_Fadeout", "0.60")
+            _e.effect_name = "Color Wash"
+            _e.settings = {"B_CHOICE_BufferStyle": "Per Model Default",
+                           "E_CHECKBOX_ColorWash_HFade": "1",
+                           "T_TEXTCTRL_Fadein": _fi, "T_TEXTCTRL_Fadeout": _fo,
+                           "X_Src": _e.settings.get("X_Src", "0")}
+            # KEEP THE LEVEL THE ORIGINAL WOULD HAVE PRODUCED. A shader or
+            # Shockwave on a single-pixel flood lights it for only part of its
+            # span; a flat wash lights it fully for all of it. Converting without
+            # compensating raised the floods -- 23 of the brightest fixtures in the
+            # show -- to full for every span, which lifted the whole-house level
+            # during run-ups and cost the drops their contrast. Measured on This
+            # Version of You: the run-up into the 1:17 hit went from 59.7 to 99.8
+            # and the hit's rise over it fell from x1.38 to x1.15.
+            if _e.palette is not None and not any(
+                    x.startswith("C_VALUECURVE_Brightness=")
+                    for x in (_e.palette.extra_parts or [])):
+                _e.palette = _e.palette.model_copy(update={
+                    "extra_parts": list(_e.palette.extra_parts or []) + [
+                        "C_VALUECURVE_Brightness=Active=TRUE|"
+                        "Id=ID_VALUECURVE_Brightness|Type=Custom|Min=0.00|"
+                        f"Max=400.00|RV=TRUE|Values=0.00:{VC_NOMINAL * 0.55:.2f};"
+                        f"1.00:{VC_NOMINAL * 0.55:.2f}"]})
+            _conv += 1
+        if _conv:
+            print(f"Floods: {_conv} spatial effects converted to a flat wash "
+                  f"(a flood is one pixel -- motion on it can only be flicker)")
+        return effects
 
-    # =====================================================================
-    # Pulse-rate ceiling, enforced on the CURVES themselves.
+    def _g_no_slab(effects):
+        # NO SOLID SLAB ON A TEXTURED MATRIX.
+        #
+        # "There is an effect in some songs on the matrices where the bottom half
+        # of the matrix is a mostly solid shape and the upper half has a shader or
+        # something... I don't like that effect so let's remove it."
+        # (The WhatsApp Shakespeare at 0:39.)
+        #
+        # Measured there: every matrix ran a shader on its body while its own
+        # `Horizontals` submodel was filled by a plain `On`, which renders as a
+        # hard-edged solid band across the middle with texture above and below --
+        # one prop showing two unrelated things at once.
+        #
+        # Only a FLAT FILL on the matrix's OWN submodel is removed, and only while
+        # the parent is textured. Chases along those strips still run (they read as
+        # motion along the outline, not as a slab), and the chord accents on the
+        # outline families are Color Wash with fades, so they are untouched -- they
+        # are the thing Krists liked in This Version of You.
+        _tex_spans: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        for _e in effects:
+            _n = _e.model_name
+            if "matrix" in _n.lower() and "tunnel" not in _n.lower() and "/" not in _n \
+                    and _e.effect_name in ("Shader", "Plasma", "Spirals"):
+                _tex_spans[_n].append((_e.start_time_ms, _e.end_time_ms))
+        # FLAT FILLS ONLY. This was briefly broadened to every effect on a matrix
+        # submodel, which was wrong on both counts: it did not fix the band (that
+        # was the Paper Layers shader, see SHADER_PICKS) and it removed movement
+        # that is wanted -- "the single strand chases on outlines is a desired
+        # effect, it gives movement we want".
+        _slab = []
+        for _e in effects:
+            _n = _e.model_name
+            if "/" not in _n or _e.effect_name != "On":
+                continue
+            _parent = _n.split("/")[0]
+            if "matrix" not in _parent.lower() or "tunnel" in _parent.lower():
+                continue
+            if any(_e.start_time_ms < _b and _a < _e.end_time_ms
+                   for _a, _b in _tex_spans.get(_parent, [])):
+                _slab.append(_e)
+        if _slab:
+            _ids = {id(e) for e in _slab}
+            effects = drop_effects(effects, _ids, "solid-slab guard")
+            print(f"Solid-slab guard: {len(_slab)} flat fills removed from matrix "
+                  f"submodels that were sitting on a textured parent")
+        return effects
+
+    def _g_slivers(effects):
+        # Sliver effects. A 30ms effect is one frame at 40fps: it cannot read as a
+        # gesture, only as a glitch, and several landing together are a strobe.
+        # These are not placed deliberately -- they are the residue of passes that
+        # trim and re-clip spans (blackout clipping, run-up dips, section splits)
+        # leaving a stub behind. Measured in Lose My Cool at 155.65s: a 0.03s Off
+        # and a 0.03s Twinkle inside a 10.9 Hz run across three matrices.
+        _SLIVER_MS = 120
+        _slivers = [e for e in effects
+                    if e.end_time_ms - e.start_time_ms < _SLIVER_MS]
+        if _slivers:
+            _ids = {id(e) for e in _slivers}
+            effects = drop_effects(effects, _ids, "sliver (under 120ms)")
+            print(f"Sliver effects: {len(_slivers)} removed "
+                  f"(shorter than {_SLIVER_MS}ms -- one to four frames)")
+
+        # These two run LAST, after the bare-canvas and cohesion fills, because
+        # those passes ADD effects. Running them earlier meant a shader the fill
+        # placed on a drop never had the outgoing shader cut from under it --
+        # Gooey 3:01, where Circuit Trace started dead on the drop while
+        # Herringbone ran on for another 1.7s -- and meant fill-created effects
+        # never had their same-layer overlaps resolved at all.
+        return effects
+
+    def _g_replace_on_drop(effects):
+        # A SHADER CHANGE ON A DROP IS A REPLACEMENT, NOT AN ADDITION.
+        #
+        # The layer-overlap pass lifts a later effect onto a free layer rather than
+        # truncating the earlier one, which is right for decay tails and wrong for
+        # a shader change: the new shader starts exactly on the drop while the old
+        # one keeps running underneath, so the two blend and the change reads as
+        # late even though it began on time. Measured on Gooey at 3:01: Circuit
+        # Trace started dead on the drop at 181.37 while Herringbone ran on until
+        # 183.10 -- 1.7s of both at once.
+        _cut_late = 0
+        _anchor_set = sorted(set(_drop_anchors)
+                             | {_on_beat(sec.start_time) for sec in analysis.sections})
+        _prop_sh: dict[str, list] = {}
+        for _e in effects:
+            if _e.effect_name == "Shader":
+                _prop_sh.setdefault(_e.model_name, []).append(_e)
+        for _row in _prop_sh.values():
+            _row.sort(key=lambda e: e.start_time_ms)
+            for _i, _new in enumerate(_row):
+                # NOT `_bt` -- that name holds the beat-times array this whole
+                # block closes over, and reusing it here silently replaced the
+                # array with a float.
+                _nstart = _new.start_time_ms / 1000.0
+                if not any(abs(_nstart - _a) <= 0.06 for _a in _anchor_set):
+                    continue
+                for _old in _row[:_i]:
+                    if _old.end_time_ms > _new.start_time_ms \
+                            and _old.start_time_ms < _new.start_time_ms:
+                        _old.end_time_ms = _new.start_time_ms
+                        _cut_late += 1
+        if _cut_late:
+            print(f"Shader replacement: {_cut_late} outgoing shaders cut at the "
+                  f"drop or section change instead of running on underneath")
+
+        # =====================================================================
+        return effects
+
+    def _g_layer_overlaps(effects):
+        # Same-layer overlap resolution -- MUST be last, after every pass that
+        # can move or lengthen an effect.
+        #
+        # An xLights EffectLayer is a single timeline: two effects cannot occupy
+        # the same milliseconds on it. 21% of the effects in this song were doing
+        # exactly that, because a dozen passes each place effects independently
+        # and none of them could see the others. The chord gestures were the
+        # clearest casualty -- three washes on Corner Verticals L1 at 26.43-29.02,
+        # 27.23-29.82 and 28.85-31.45, each correct on its own, together
+        # unrenderable, which is why those props measured DARK in the .fseq while
+        # the .xsq looked right. This is almost certainly why several rounds of
+        # fixes have measured inert: the change was real in the file and never
+        # reached the pixels.
+        #
+        # Resolution moves the LATER effect up a layer, which is both what the eye
+        # expects (the newer event paints over the older) and what preserves the
+        # long decay tails that make a chord ring. Truncation is the fallback for
+        # when there is genuinely no free layer.
+        _MAX_LAYER = 12
+        _lanes: dict[tuple[str, int], list] = {}
+        for _e in effects:
+            _lanes.setdefault((_e.model_name, _e.layer), []).append(_e)
+        _moved = _cut = 0
+        _busy = {k: sorted((e.start_time_ms, e.end_time_ms) for e in v)
+                 for k, v in _lanes.items()}
+        for (_mn, _lay), _row in sorted(_lanes.items()):
+            _row.sort(key=lambda e: (e.start_time_ms, e.end_time_ms))
+            _end = None
+            for _e in _row:
+                if _end is not None and _e.start_time_ms < _end:
+                    _dest = None
+                    for _l2 in range(_lay + 1, _MAX_LAYER):
+                        _occ = _busy.get((_mn, _l2), [])
+                        if not any(_e.start_time_ms < _b and _a < _e.end_time_ms
+                                   for _a, _b in _occ):
+                            _dest = _l2
+                            break
+                    if _dest is not None:
+                        _busy.setdefault((_mn, _dest), []).append(
+                            (_e.start_time_ms, _e.end_time_ms))
+                        _e.layer = _dest
+                        _moved += 1
+                        continue
+                    _e.start_time_ms = _end
+                    _cut += 1
+                    if _e.end_time_ms - _e.start_time_ms < 200:
+                        _e.end_time_ms = _e.start_time_ms + 200
+                _end = max(_end or 0, _e.end_time_ms)
+        print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
+              f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
+              f"effects on it do not render)")
+
+        # The ceiling runs LAST, after the replacement cut and the overlap pass,
+        # because those SHORTEN spans -- and a value curve's times are normalised
+        # across its effect's own span, so shortening one compresses its curve.
+        # Measured on Too Slow: the replacement cut took the Cable Knit house bed
+        # from 11.5s to 4.0s, compressing its pulse by 2.9x, and the strobe count
+        # went from 16 runs to 87 -- on props whose ONLY effect was that bed.
+
+        # =====================================================================
+        return effects
+
+    def _g_pulse_ceiling(effects):
+        # Pulse-rate ceiling, enforced on the CURVES themselves.
+        #
+        # A value curve's times are normalised across its effect's span, so a curve
+        # built against one span and then applied to a shorter one pulses faster
+        # than the music it came from -- 38 points inside 1.02s on Harmony, which
+        # is a 19 Hz flicker. Several passes build curves and several others resize
+        # effects, so no single one of them can prevent this; it has to be checked
+        # at the end, in real seconds, against the span each curve actually ends up
+        # with.
+        #
+        # "Across songs we're using the floods too much and strobing... no songs
+        # should do that", and on the floods specifically: "it can give people
+        # migraines." 240ms is the same ceiling the effect-spacing pass uses.
+        _MIN_PT_S = 0.24
+        # Floods get the musical limit, not the safety limit. 240ms is four
+        # pulses a second, which is faster than a quarter note on every song in
+        # this show -- fine for a prop with shape, far too fast for a single-pixel
+        # flood that can only express brightness. "The floods would never go
+        # faster than quarter or half notes."
+        _QUARTER_S = 60.0 / max(analysis.beats.tempo, 60.0)
+        _fixed = 0
+        for _e in effects:
+            _pal = _e.palette
+            if _pal is None or not _pal.extra_parts:
+                continue
+            _vc = next((x for x in _pal.extra_parts
+                        if x.startswith("C_VALUECURVE_Brightness=")), None)
+            if _vc is None:
+                continue
+            _m = re.search(r"Values=([0-9.:;]+)", _vc)
+            if not _m:
+                continue
+            _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+            if _dur <= 0:
+                continue
+            _limit = (max(_MIN_PT_S, _QUARTER_S)
+                      if "flood" in _e.model_name.lower() else _MIN_PT_S)
+            try:
+                _pts = [(float(a), float(b)) for a, b in
+                        (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
+            except ValueError:
+                continue
+            if len(_pts) < 3:
+                continue
+            _pts.sort()
+            _keep, _last_t = [_pts[0]], _pts[0][0]
+            for _t, _v in _pts[1:-1]:
+                if (_t - _last_t) * _dur >= _limit:
+                    _keep.append((_t, _v))
+                    _last_t = _t
+            if (_pts[-1][0] - _last_t) * _dur >= _limit or len(_keep) == 1:
+                _keep.append(_pts[-1])
+            if len(_keep) == len(_pts):
+                continue
+            _new_vc = _vc[:_m.start(1)] + ";".join(
+                f"{t:.3f}:{v:.2f}" for t, v in _keep) + _vc[_m.end(1):]
+            _e.palette = _pal.model_copy(update={"extra_parts": [
+                _new_vc if x is _vc else x for x in _pal.extra_parts]})
+            _fixed += 1
+        print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
+              f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
+        return effects
+
+    # THE LATE GUARDS, IN ORDER. Everything above places effects; everything
+    # here corrects what came out. The order is not incidental and three bugs
+    # in one day came from getting it wrong, so it is written down as data
+    # rather than left implicit in the order the blocks happen to sit in.
     #
-    # A value curve's times are normalised across its effect's span, so a curve
-    # built against one span and then applied to a shorter one pulses faster
-    # than the music it came from -- 38 points inside 1.02s on Harmony, which
-    # is a 19 Hz flicker. Several passes build curves and several others resize
-    # effects, so no single one of them can prevent this; it has to be checked
-    # at the end, in real seconds, against the span each curve actually ends up
-    # with.
-    #
-    # "Across songs we're using the floods too much and strobing... no songs
-    # should do that", and on the floods specifically: "it can give people
-    # migraines." 240ms is the same ceiling the effect-spacing pass uses.
-    _MIN_PT_S = 0.24
-    # Floods get the musical limit, not the safety limit. 240ms is four
-    # pulses a second, which is faster than a quarter note on every song in
-    # this show -- fine for a prop with shape, far too fast for a single-pixel
-    # flood that can only express brightness. "The floods would never go
-    # faster than quarter or half notes."
-    _QUARTER_S = 60.0 / max(analysis.beats.tempo, 60.0)
-    _fixed = 0
-    for _e in effects:
-        _pal = _e.palette
-        if _pal is None or not _pal.extra_parts:
-            continue
-        _vc = next((x for x in _pal.extra_parts
-                    if x.startswith("C_VALUECURVE_Brightness=")), None)
-        if _vc is None:
-            continue
-        _m = re.search(r"Values=([0-9.:;]+)", _vc)
-        if not _m:
-            continue
-        _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
-        if _dur <= 0:
-            continue
-        _limit = (max(_MIN_PT_S, _QUARTER_S)
-                  if "flood" in _e.model_name.lower() else _MIN_PT_S)
-        try:
-            _pts = [(float(a), float(b)) for a, b in
-                    (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
-        except ValueError:
-            continue
-        if len(_pts) < 3:
-            continue
-        _pts.sort()
-        _keep, _last_t = [_pts[0]], _pts[0][0]
-        for _t, _v in _pts[1:-1]:
-            if (_t - _last_t) * _dur >= _limit:
-                _keep.append((_t, _v))
-                _last_t = _t
-        if (_pts[-1][0] - _last_t) * _dur >= _limit or len(_keep) == 1:
-            _keep.append(_pts[-1])
-        if len(_keep) == len(_pts):
-            continue
-        _new_vc = _vc[:_m.start(1)] + ";".join(
-            f"{t:.3f}:{v:.2f}" for t, v in _keep) + _vc[_m.end(1):]
-        _e.palette = _pal.model_copy(update={"extra_parts": [
-            _new_vc if x is _vc else x for x in _pal.extra_parts]})
-        _fixed += 1
-    print(f"Pulse-rate ceiling: {_fixed} brightness curves thinned to at most "
-          f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
+    # The invariants the order encodes, in the words of the bugs that found
+    # them:
+    #   * anything that ADDS effects must run before anything that VALIDATES
+    #     them -- the fills used to run after the overlap resolver, so nothing
+    #     they placed ever had its overlaps resolved;
+    #   * anything that SHORTENS a span must run before the pulse ceiling,
+    #     because a value curve's times are normalised across its own span, so
+    #     shortening one compresses its curve;
+    #   * the overlap resolver must be last of the structural passes, since
+    #     every other guard can move or lengthen an effect.
+    LATE_GUARDS = [
+        ("fill canvases lit flat by the house span", _g_fill_flat_canvases),
+        ("floods carry flat light only", _g_floods_flat),
+        ("no solid slab on a textured matrix", _g_no_slab),
+        ("drop sliver effects", _g_slivers),
+        ("shader change on a drop is a replacement", _g_replace_on_drop),
+        ("resolve same-layer overlaps", _g_layer_overlaps),
+        ("pulse-rate ceiling on the curves", _g_pulse_ceiling),
+    ]
+    for _gname, _gfn in LATE_GUARDS:
+        _before = len(effects)
+        effects = _gfn(effects)
+        GUARD_LOG.append({"guard": _gname, "before": _before,
+                          "after": len(effects)})
 
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
@@ -9161,8 +9233,15 @@ def main():
         _prov = {}
         for _ln, _n in _src.items():
             _prov[str(_ln)] = {"count": _n, "pass": _pass_label(_ln, _srclines)}
-        (GEN_DIR / "provenance.json").write_text(
-            json.dumps({"total": len(effects), "by_line": _prov}, indent=1))
+        (GEN_DIR / "provenance.json").write_text(json.dumps({
+            "total": len(effects),
+            "by_line": _prov,
+            "guards": GUARD_LOG,
+            "removals": [{**_r, "from_passes": {
+                _pass_label(int(_k), _srclines): _v
+                for _k, _v in _r["from_lines"].items()}}
+                for _r in REMOVALS],
+        }, indent=1))
     except Exception as _e:                     # never block a build on this
         print(f"  (provenance summary skipped: {_e})")
 
