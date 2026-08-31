@@ -150,8 +150,33 @@ VSTACK = {"B_CHOICE_BufferStyle": "Vertical Stack"}
 # far faster than reasoning about geometry.
 PMSL = {"B_CHOICE_BufferStyle": "Per Model Single Line"}
 
-def _chase(direction: str, fade: str = "Head and Tail", span: bool = True,
-           chases: str = "1") -> dict:
+# LEARNED FROM KRISTS'S OWN SEQUENCES (the 2025 40fps set), by measuring what
+# he actually puts on outlines, flakes, mini trees and the window matrices.
+# Across 17 of his sequences the SingleStrand vocabulary on outline groups is:
+#
+#   chase type   Bounce from Left 2693, Left-Right 1536, Right-Left 1301,
+#                From Middle 447, To Middle 398, Dual Chase 109
+#   buffer       Per Model Per Preview 2624, none 1607, Per Model Default 717,
+#                Overlay - Scaled 399, Per Model Single Line 395
+#   fade         From Head 3419, None 3062, Head and Tail 24
+#
+# Head and Tail was this generator's DEFAULT and therefore 100% of its chases,
+# against 0.4% of his. A head fade leaves a trail behind the dot instead of
+# tapering both ends, which is what makes a chase read as travelling rather
+# than as a lit segment sliding.
+#   rotations    1.0 (4694), 0.4 (1302), 4 (71)
+#   FX           Fireworks 1D 3321, none 3097
+#
+# Mine, for comparison, on the same prop families: Left-Right/Right-Left only,
+# Per Model Default on 96%, Head and Tail on 100%, and no SingleStrand FX at
+# all. Three of his five most-used settings did not exist in this generator.
+PMPP = {"B_CHOICE_BufferStyle": "Per Model Per Preview"}
+OVERLAY = {"B_CHOICE_BufferStyle": "Overlay - Scaled"}
+
+
+def _chase(direction: str, fade: str = "From Head", span: bool = True,
+           chases: str = "1", rotations: str = "1.0", fx: str | None = None,
+           buffer: dict | None = None) -> dict:
     s = {
         "E_CHECKBOX_Chase_Group_All": "0",
         "E_CHOICE_Chase_Type1": direction,
@@ -169,9 +194,20 @@ def _chase(direction: str, fade: str = "Head and Tail", span: bool = True,
         # line to hand over to the next, so the same musical timing produces
         # a much calmer apparent speed.
         "E_SLIDER_Number_Chases": chases,
-        "E_TEXTCTRL_Chase_Rotations": "1.0",
+        # Rotations is the chase's SPEED: how many times it crosses within its
+        # own span. Krists uses 1.0 for a plain pass and 0.4 for a drift that
+        # never reaches the end -- a slow reveal rather than a sweep -- and 4
+        # for a genuine flurry. Only 1.0 existed here.
+        "E_TEXTCTRL_Chase_Rotations": rotations,
     }
-    if span:
+    if fx:
+        # SingleStrand's own FX layer, on more than half of his chases. It puts
+        # sparkle INSIDE the chase, so one effect carries both the travel and
+        # the detail, where this generator would have stacked two.
+        s["E_CHOICE_SingleStrand_FX"] = fx
+    if buffer is not None:
+        s.update(buffer)
+    elif span:
         s.update(SPAN)
     return s
 
@@ -217,6 +253,33 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     "chase_mid_out":  ("SingleStrand", _chase("From Middle")),
     "chase_mid_in":   ("SingleStrand", _chase("To Middle")),
     "chase_bounce":   ("SingleStrand", _chase("Bounce from Left")),
+    # --- the human vocabulary, added 2026-08-29 -------------------------------
+    # Same gestures Krists reaches for, with the settings he actually uses:
+    # per-model-per-preview buffers so each prop performs the chase in its own
+    # geometry while keeping its place on the facade, head-fades instead of
+    # head-and-tail, and the slow 0.4-rotation drift that reads as a reveal.
+    "chase_bounce_pp": ("SingleStrand", _chase("Bounce from Left", fade="From Head",
+                                               buffer=PMPP)),
+    "chase_bounce_drift": ("SingleStrand", _chase("Bounce from Left", fade="From Head",
+                                                  rotations="0.4", buffer=PMPP)),
+    "chase_lr_pp":    ("SingleStrand", _chase("Left-Right", fade="From Head",
+                                              buffer=PMPP)),
+    "chase_rl_pp":    ("SingleStrand", _chase("Right-Left", fade="From Head",
+                                              buffer=PMPP)),
+    "chase_mid_out_pp": ("SingleStrand", _chase("From Middle", fade="From Head",
+                                                buffer=PMPP)),
+    "chase_mid_in_pp": ("SingleStrand", _chase("To Middle", fade="From Head",
+                                               buffer=PMPP)),
+    "chase_dual":     ("SingleStrand", _chase("Dual Chase", fade="From Head",
+                                              buffer=PMPP)),
+    # Sparkle carried INSIDE the chase rather than stacked on top of it.
+    "chase_spark":    ("SingleStrand", _chase("Bounce from Left", fade="None",
+                                              fx="Fireworks 1D", buffer=PMPP)),
+    "chase_spark_lr": ("SingleStrand", _chase("Left-Right", fade="From Head",
+                                              fx="Fireworks 1D", buffer=PMPP)),
+    # A flurry: four crossings inside one span, for a fill or a drum roll.
+    "chase_flurry":   ("SingleStrand", _chase("Bounce from Left", fade="From Head",
+                                              rotations="4", buffer=PMPP)),
     # Multi-dot variants for long runs (C9 gutter line, long outlines) -- see
     # the `chases` note in _chase().
     "chase_dots_lr":  ("SingleStrand", _chase("Left-Right", chases="4")),
@@ -377,6 +440,60 @@ EFFECTS: dict[str, tuple[str, dict]] = {
                                        "E_CHECKBOX_ColorWash_HFade": "1",
                                        "T_TEXTCTRL_Fadein": "0.5",
                                        "T_TEXTCTRL_Fadeout": "0.5"}),
+    # --- shapes learned from Krists's sequences ------------------------------
+    # Ripple as he uses it: a POLYGON with a point count, imploding or
+    # exploding, rather than the plain circle this generator had. Six points on
+    # a snowflake is the snowflake's own shape collapsing into itself, which is
+    # why it reads as belonging to the prop instead of being drawn on top of
+    # it. 246 uses on his window matrices alone.
+    "ripple_hex_in":  ("Ripple", {"E_CHOICE_Ripple_Object_To_Draw": "Polygon",
+                                  "E_SLIDER_RIPPLE_POINTS": "6",
+                                  "E_CHOICE_Ripple_Movement": "Implode",
+                                  "E_CHOICE_Ripple_Draw_Style": "Old",
+                                  "E_CHECKBOX_Ripple3D": "0",
+                                  "E_SLIDER_Ripple_Thickness": "12",
+                                  "B_CHOICE_BufferStyle": "Per Model Default"}),
+    "ripple_hex_out": ("Ripple", {"E_CHOICE_Ripple_Object_To_Draw": "Polygon",
+                                  "E_SLIDER_RIPPLE_POINTS": "6",
+                                  "E_CHOICE_Ripple_Movement": "Explode",
+                                  "E_CHOICE_Ripple_Draw_Style": "Old",
+                                  "E_CHECKBOX_Ripple3D": "0",
+                                  "E_SLIDER_Ripple_Thickness": "12",
+                                  "B_CHOICE_BufferStyle": "Per Model Default"}),
+    # Lines radiating outward in 3D -- his second-most-used ripple, and a
+    # different look entirely: rays rather than rings.
+    "ripple_rays":    ("Ripple", {"E_CHOICE_Ripple_Object_To_Draw": "Circle",
+                                  "E_CHOICE_Ripple_Draw_Style": "Lines Outward",
+                                  "E_CHOICE_Ripple_Movement": "Explode",
+                                  "E_CHECKBOX_Ripple3D": "1",
+                                  "E_SLIDER_Ripple_Thickness": "8",
+                                  "B_CHOICE_BufferStyle": "Per Model Default"}),
+    # Pinwheel as a SWEEP rather than a spinning fan -- the arm smears round
+    # instead of strobing past, which is why his version survives on a matrix
+    # where the plain fan was "too basic".
+    "pinwheel_sweep": ("Pinwheel", {"E_CHOICE_Pinwheel_3D": "Sweep",
+                                    "E_CHOICE_Pinwheel_Style": "New Render Method",
+                                    "E_CHECKBOX_Pinwheel_Rotation": "1",
+                                    "E_SLIDER_Pinwheel_ArmSize": "100",
+                                    "E_SLIDER_Pinwheel_Arms": "3",
+                                    "E_SLIDER_PinwheelXC": "0",
+                                    "E_SLIDER_PinwheelYC": "0",
+                                    "B_CHOICE_BufferStyle": "Per Model Default"}),
+    # A curtain closing from the MIDDLE across a whole group as one canvas --
+    # 746 uses on his mini trees. The group becomes one object that shuts,
+    # which no per-model effect can express.
+    "curtain_mid":    ("Curtain", {"E_CHOICE_Curtain_Edge": "middle",
+                                   "E_CHOICE_Curtain_Effect": "close",
+                                   "E_CHECKBOX_Curtain_Repeat": "0",
+                                   "E_SLIDER_Curtain_Swag": "0",
+                                   "E_TEXTCTRL_Curtain_Speed": "1.0",
+                                   "B_CHOICE_BufferStyle": "Per Preview"}),
+    "curtain_mid_open": ("Curtain", {"E_CHOICE_Curtain_Edge": "middle",
+                                     "E_CHOICE_Curtain_Effect": "open",
+                                     "E_CHECKBOX_Curtain_Repeat": "0",
+                                     "E_SLIDER_Curtain_Swag": "0",
+                                     "E_TEXTCTRL_Curtain_Speed": "1.0",
+                                     "B_CHOICE_BufferStyle": "Per Preview"}),
     # --- bursts ---
     "on_hit":         ("On", {"T_TEXTCTRL_Fadein": "0.02", "T_TEXTCTRL_Fadeout": "0.12"}),
     "on_pop":         ("On", {"T_TEXTCTRL_Fadein": "0.01", "T_TEXTCTRL_Fadeout": "0.22"}),
@@ -2394,7 +2511,7 @@ VOICE_MOTION_BY_CAT: dict[str, tuple[str, str]] = {
 VOICE_MOTION_MIN_GAP_S = 0.22
 
 
-def line_motion_for(target: dict) -> tuple[str, str]:
+def line_motion_for(target: dict, seed: str = "") -> tuple[str, str]:
     """Pick the right chase for a linear prop, by ORIENTATION and LENGTH.
 
     Three separate corrections are encoded here, all from the same round:
@@ -2418,10 +2535,42 @@ def line_motion_for(target: dict) -> tuple[str, str]:
         # physically up-and-down travel. See PMSL for why Bars(direction=up)
         # does NOT work here: these props are `DisplayAs="Single Line"`, so
         # their buffer has no second dimension for "up" to mean anything.
-        return ("strand_up", "strand_down")
+        # VARIETY WITHIN THE ORIENTATION RULE. The rule above is about
+        # geometry and stays; what was missing is that every linear prop in a
+        # song got the SAME pair, so 2136 of Gooey's outline chases were six
+        # keys with one settings profile between them. Krists's own sequences
+        # run Bounce, From/To Middle, Dual Chase and the Fireworks FX across
+        # the same props, with head fades and per-model-per-preview buffers.
+        #
+        # `seed` keeps a prop's choice stable within a section and lets it
+        # change between sections, so it is variety rather than jitter.
+        _r = random.Random(f"{target['name']}|{seed}")
+        return _r.choice([
+            ("strand_up", "strand_down"),
+            ("strand_up", "strand_down"),
+            ("chase_bounce_pp", "chase_bounce_pp"),
+            ("chase_bounce_drift", "chase_bounce_drift"),
+            ("chase_spark", "chase_spark"),
+        ])
     wide = target.get("spread_x", 0) >= 40 or "c9" in name or "gutter" in name
-    return ("chase_dots_lr", "chase_dots_rl") if wide else \
-           ("chase_pair_lr", "chase_pair_rl")
+    _r = random.Random(f"{target['name']}|{seed}")
+    if wide:
+        # A long run still needs several dots so nothing races the length of
+        # it -- that correction is preserved in every option here.
+        return _r.choice([
+            ("chase_dots_lr", "chase_dots_rl"),
+            ("chase_dots_lr", "chase_dots_rl"),
+            ("chase_spark_lr", "chase_spark_lr"),
+            ("chase_bounce_drift", "chase_bounce_drift"),
+        ])
+    return _r.choice([
+        ("chase_pair_lr", "chase_pair_rl"),
+        ("chase_bounce_pp", "chase_bounce_pp"),
+        ("chase_mid_out_pp", "chase_mid_in_pp"),
+        ("chase_dual", "chase_dual"),
+        ("chase_spark", "chase_spark"),
+        ("chase_lr_pp", "chase_rl_pp"),
+    ])
 
 
 # The fan is out of the LARGE rotation -- "the spinning fan thing is just too
@@ -2595,7 +2744,17 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
         return rng.choice(["meteors_icicle", "chase_mid_out", "chase_bounce",
                            "chase_lr"])
     if cat == "single_line":
-        return rng.choice(["chase_bounce", "chase_mid_out", "chase_lr", "chase_rl"])
+        # Widened to the vocabulary measured in Krists's own sequences, where
+        # outline groups carry Bounce far more than anything else, use head
+        # fades rather than head-and-tail, and about half the chases carry the
+        # Fireworks FX inside them. The old four-way choice was three settings
+        # deep; this is the same gestures with his parameters plus the drift
+        # and flurry speeds he uses to separate a reveal from a fill.
+        return rng.choice([
+            "chase_bounce_pp", "chase_bounce_pp", "chase_bounce_drift",
+            "chase_lr_pp", "chase_rl_pp", "chase_mid_out_pp", "chase_mid_in_pp",
+            "chase_dual", "chase_spark", "chase_spark_lr",
+            "chase_bounce", "chase_mid_out", "chase_lr", "chase_rl"])
     if cat == "arch":
         # Deliberate, readable sweeps -- NOT fast multi-rotation blur.
         return rng.choice(["chase_lr", "chase_rl", "chase_mid_out", "chase_mid_in"])
@@ -2605,11 +2764,19 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
         # with the buffer-style fix. Curtain stays reserved for genuine
         # curtain-shaped containers (LARGE_CANVAS); real shaders substitute
         # for the texture Ripple/Curtain would have added.
+        # Ripple IS used on matrices in Krists's sequences -- 450 times on the
+        # front window matrices alone -- but as a POLYGON that implodes, not
+        # the plain circle that caused the old red flashes. Pinwheel likewise,
+        # as a Sweep rather than a spinning fan. Both were excluded here on
+        # evidence from a version of the effects that he does not use.
         if escalation >= 2:
-            return rng.choice(["chase_mid_out", "plasma_organic", *SHADER_KEYS])
-        return rng.choice(["chase_lr", "chase_rl", "wash", "plasma_organic"])
+            return rng.choice(["chase_mid_out", "ripple_hex_in", "pinwheel_sweep",
+                               *SHADER_KEYS])
+        return rng.choice(["chase_lr", "chase_rl", "wash",
+                           "ripple_hex_in", "ripple_hex_out", "pinwheel_sweep"])
     if cat == "tree":
-        return rng.choice(["chase_mid_out", "meteors_down", "spirals"])
+        return rng.choice(["chase_mid_out", "meteors_down", "spirals",
+                           "chase_bounce_drift"])
     # scattered decorative props -> step prop to prop
     # SUBMODELS TRACE THE PROP'S SHAPE. "For the submodels on the flakes and
     # spinners and rosa grande and grand illusion and those kinds of props, I
@@ -2631,10 +2798,17 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
             "chase_pair_lr", "chase_pair_rl",     # two dots meeting
             "shockwave", "ripple_explode",        # radial from the centre
             "pinwheel",                           # rotates about the middle
+            # From Krists's sequences: a six-point polygon collapsing into the
+            # middle is a snowflake closing on its own geometry, and it is what
+            # he actually uses on flake and snowflake parts. Rays are the same
+            # idea drawn as spokes rather than rings.
+            "ripple_hex_in", "ripple_hex_out", "ripple_rays",
+            "chase_bounce_pp", "chase_spark",
         ])
     if n >= 4:
         return rng.choice(["sweep_right", "sweep_left"] if wide else ["sweep_up", "sweep_down"])
-    return rng.choice(["chase_lr", "chase_rl", "shockwave"])
+    return rng.choice(["chase_lr", "chase_rl", "shockwave",
+                       "chase_bounce_pp", "ripple_hex_in"])
 
 
 MIN_FLASH_GAP_S = 0.28  # ~3.5Hz cap -- feedback: faster than 2-4/sec reads as random strobing
@@ -3224,6 +3398,18 @@ def main():
         as a solid error color instead of the intended motion."""
         if key in SPAN_SENSITIVE_KEYS and target["kind"] == "group" and not target.get("synthetic"):
             extra = {**(extra or {}), **SPAN}
+        # The buffer style a placement will ACTUALLY get: `extra` wins over the
+        # recipe, but the recipe is where most styles are declared. Every guard
+        # below has to test this rather than `extra` alone -- checking `extra`
+        # meant a style set in the recipe was invisible to them, which is how
+        # Per Model Per Preview kept being rewritten to Per Model Default on
+        # 96% of chases despite three separate guards meant to preserve it.
+        def _eff_buffer() -> str | None:
+            return (extra or {}).get(
+                "B_CHOICE_BufferStyle",
+                EFFECTS.get(key, ("", {}))[1].get("B_CHOICE_BufferStyle"))
+
+        _PER_MODEL_OK = ("Per Model Per Preview", "Per Model Single Line")
         # A centred effect never spans -- see is_centred(). Per-model instead,
         # so each prop gets a whole shape of its own rather than a slice of one
         # whose middle falls in the gap between props.
@@ -3242,9 +3428,17 @@ def main():
         if (target["kind"] == "group" and target["members"]
                 and sum(1 for m in target["members"] if "/" in m)
                     >= max(1, len(target["members"]) // 2)):
-            extra = {k: v for k, v in (extra or {}).items()
-                     if k != "B_CHOICE_BufferStyle"}
-            extra = {**extra, **PERMODEL}
+            # ...unless a PER-MODEL style was asked for explicitly. These
+            # rules exist to stop a group SPANNING one canvas across separate
+            # props; Per Model Per Preview and Per Model Single Line already
+            # render each model in its own buffer, so replacing them with Per
+            # Model Default only discards the preview orientation Krists's own
+            # sequences rely on -- it is his most-used buffer by a wide margin
+            # (2624 of his outline chases) and this was silently rewriting it.
+            if _eff_buffer() not in _PER_MODEL_OK:
+                extra = {k: v for k, v in (extra or {}).items()
+                         if k != "B_CHOICE_BufferStyle"}
+                extra = {**extra, **PERMODEL}
         # A depth-oriented prop can never take a spanning buffer -- it is one
         # column wide on the shared canvas, so spanning lights the whole thing
         # as a slab. Per-model gives it its own buffer and a real render.
@@ -3257,15 +3451,29 @@ def main():
         # the same gesture instead of two of them behaving differently.
         if (target["name"] in DEPTH_ORIENTED
                 or any(m in DEPTH_ORIENTED for m in target["members"])):
-            extra = {k: v for k, v in (extra or {}).items()
-                     if k != "B_CHOICE_BufferStyle"}
-            extra = {**extra, **PERMODEL}
+            # ...unless a PER-MODEL style was asked for explicitly. These
+            # rules exist to stop a group SPANNING one canvas across separate
+            # props; Per Model Per Preview and Per Model Single Line already
+            # render each model in its own buffer, so replacing them with Per
+            # Model Default only discards the preview orientation Krists's own
+            # sequences rely on -- it is his most-used buffer by a wide margin
+            # (2624 of his outline chases) and this was silently rewriting it.
+            if _eff_buffer() not in _PER_MODEL_OK:
+                extra = {k: v for k, v in (extra or {}).items()
+                         if k != "B_CHOICE_BufferStyle"}
+                extra = {**extra, **PERMODEL}
         # Per-model rendering wins over any spanning buffer style: for a group
         # of discrete scattered objects (stars, mini trees, floods) spanning
         # is exactly the thing that turns motion into strobing. Applied last
         # so it overrides the SPAN injection above.
-        if target.get("per_model") and target["kind"] == "group" \
-                and not target.get("synthetic"):
+        if (target.get("per_model") and target["kind"] == "group"
+                and not target.get("synthetic")
+                and _eff_buffer() not in _PER_MODEL_OK):
+            # Per Model Per Preview satisfies this rule already: it renders
+            # each member in its own buffer. Overwriting it with Per Model
+            # Default threw away the preview orientation for no gain, and
+            # between them these five override sites were rewriting 96% of
+            # the chases back to one buffer style.
             extra = {**(extra or {}), **PERMODEL}
         # "Default" ON A GROUP IS A TRAP.
         #
@@ -5814,13 +6022,62 @@ def main():
             # one. The beat still lands; it just lands as a pulse on a prop
             # that is already moving, instead of a second competing travel.
             if target["name"] in movement_props:
-                return "on_pop"
+                # A burst is not a second TRAVEL. The rule here is that a prop
+                # already carrying a chase must not get a competing chase at a
+                # different rate -- that stands. But a flat `On` was not the
+                # only way to satisfy it: a shockwave expands from the middle
+                # rather than running along the strand, so it marks the beat
+                # without racing the motion already there, and on a 639-node
+                # candy cane it draws the cane instead of filling it.
+                return random.Random(f"pulse|{target['name']}").choice(
+                    ["on_pop", "shockwave", "on_pop", "shockwave", "on_pop"])
             # C9 gutters and other free linear props: a burst travelling out
             # from the middle marks the beat AND shows the prop's length.
             return "chase_mid_out"
         if target["cat"] == "arch":
             return "on_hit"
-        return "on_pop"
+        # A DECORATIVE PROP WITH GEOMETRY MOVES; IT DOES NOT JUST FLASH.
+        #
+        # Everything that reached here got a flat `on_pop`, which made the
+        # small props 58-79% flat flashes. Measured against Krists's own 2025
+        # sequences on the same families:
+        #
+        #   showstopper   his Shockwave 46% / On 36%   mine On 58%, Shockwave 11%
+        #   snowflake     his Shockwave 45% / On 10%   mine On 69%, Shockwave  5%
+        #   mini tree     his SingleStrand 32%, Curtain 14%, Shockwave 14%,
+        #                 On 5%                        mine On 79%
+        #
+        # These props have real shape -- arms, spokes, rings, a cone -- and he
+        # marks the beat by drawing that shape rather than filling it. The
+        # choice is seeded by the prop name so a given prop keeps its own
+        # signature through the song instead of flickering between gestures.
+        _nm = target["name"].lower()
+        _r = random.Random(f"beat-hit|{target['name']}")
+        if any(h in _nm for h in ("mini tree", "tree")):
+            # Cone-shaped: travel along it, or shut it like a curtain.
+            return _r.choice(["chase_mid_out", "chase_bounce_drift",
+                              "curtain_mid", "shockwave", "on_pop"])
+        if any(h in _nm for h in ("flake", "snowflake", "showstopper",
+                                  "spinner", "sphere", "star", "wreath")):
+            # Radial by construction: a ring or polygon expanding from the
+            # middle traces the prop instead of blanking it.
+            return _r.choice(["shockwave", "shockwave", "shockwave",
+                              "ripple_hex_in", "ripple_hex_out", "ripple_rays",
+                              "pinwheel", "on_pop", "on_pop"])
+        # THE DEFAULT IS MOVEMENT, NOT A FLASH.
+        #
+        # This fallback produced 81% of every `On` in the song, and what it
+        # was flashing is not point-like: candy canes at 600-639 nodes, canes
+        # at 567, presents at 150. A 639-node cane lit flat is a coloured
+        # shape; a chase along it draws the cane.
+        #
+        # Measured across 17 of Krists's own sequences: On is 6% of his
+        # effects and SingleStrand 30%, against 71% and 15% here. He has 46
+        # distinct effect types in play; this generator had 14. The flash stays
+        # in the pool -- it is what makes the stepping read as rhythm rather
+        # than as continuous motion -- but it is no longer the whole answer.
+        return _r.choice(["chase_mid_out", "chase_bounce_pp", "chase_spark",
+                          "shockwave", "on_pop", "on_pop"])
 
     # accent_pool / anchor_rank / section_anchor are all computed before the
     # staging passes above, so those passes can suppress the ambient fill on
@@ -6162,13 +6419,22 @@ def main():
                         # available -- it is what makes the stepping read as
                         # rhythm rather than as continuous motion.
                         _low = parts[idx].lower()
+                        # Widened with the ripple shapes measured in Krists's
+                        # sequences: a six-point polygon imploding is a flake
+                        # closing on its own geometry, and rays are the spoke
+                        # version of the same idea. Both are things he puts on
+                        # exactly these parts and this generator could not
+                        # express at all.
                         if any(w in _low for w in ("spoke", "arm", "petal",
                                                    "whirl", "spinner", "flower")):
-                            _shape = ["chase_mid_out", "pinwheel", "on_pop"]
+                            _shape = ["chase_mid_out", "pinwheel", "on_pop",
+                                      "ripple_rays", "chase_bounce_pp"]
                         elif any(w in _low for w in ("ring", "circle")):
-                            _shape = ["shockwave", "ripple_explode", "on_pop"]
+                            _shape = ["shockwave", "ripple_explode", "on_pop",
+                                      "ripple_hex_in", "ripple_hex_out"]
                         else:
-                            _shape = ["chase_lr", "chase_rl", "on_pop"]
+                            _shape = ["chase_lr", "chase_rl", "on_pop",
+                                      "chase_spark", "ripple_hex_in"]
                         add(f"{prop}/{parts[idx]}", L_PULSE,
                             _shape[(hi + idx) % len(_shape)],
                             t_ms, t_ms + step_ms, pal)
@@ -6728,7 +6994,7 @@ def main():
                 ph = beat_phase(t, every=2)
                 for tgt in ens_targets:
                     _sp = big_span if "(Large)" in tgt["name"] else span
-                    mot = line_motion_for(tgt)
+                    mot = line_motion_for(tgt, seed=f"{si}")
                     # A FRONT-TO-BACK STRAND CHASES THE OTHER WAY ROUND.
                     # Its own buffer runs along Z, so "left to right" in model
                     # space reads as back-to-front from the street -- opposite
