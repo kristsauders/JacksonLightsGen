@@ -6351,7 +6351,8 @@ def main():
                 # same value inside one matrix. Reported still too fast on
                 # two separate songs after the first reduction.
                 slowed["E_SLIDER_Shader_Speed"] = str(
-                    max(25, int(int(slowed.get("E_SLIDER_Shader_Speed", 400)) * 0.12)))
+                    max(60, int(int(slowed.get("E_SLIDER_Shader_Speed", 400)) * 0.12)))
+                slowed["X_AmbientSlowed"] = "1"
                 EFFECTS[slow_key] = (ename, slowed)
             for j in range(len(marks) - 1):
                 s_ms, e_ms = int(marks[j] * 1000), int(marks[j + 1] * 1000)
@@ -7942,10 +7943,22 @@ def main():
                 continue
             st = eff.settings
             if "E_SLIDER_Shader_Speed" in st:
+                # SLOW ONCE. Without the marker this pass could reach the same
+                # effect twice (240 -> 72 -> 30), landing on the floor, and a
+                # shader at speed 30 does not drift, it stands still. Measured
+                # on The WhatsApp Shakespeare at 1:50: Contour Drift on every
+                # matrix, the tree and the tunnel at Shader_Speed=30 -- "all
+                # the matrices and tunnel and tree are just blue... there might
+                # be some shape or movement that is supposed to be there but
+                # it's not."
+                #
+                # The floor is also far too low. An ambient passage wants a
+                # drift, not a freeze; 90 still reads as slow next to a base of
+                # 240-400 while actually moving.
                 v = int(st["E_SLIDER_Shader_Speed"])
-                if v > 60:
-                    eff.settings = {**st,
-                                    "E_SLIDER_Shader_Speed": str(max(30, int(v * 0.30)))}
+                if v > 60 and st.get("X_AmbientSlowed") != "1":
+                    eff.settings = {**st, "X_AmbientSlowed": "1",
+                                    "E_SLIDER_Shader_Speed": str(max(90, int(v * 0.30)))}
                     _slowed += 1
             elif "E_TEXTCTRL_Chase_Rotations" in st:
                 # A chase's rotation count is its speed. One rotation over a
