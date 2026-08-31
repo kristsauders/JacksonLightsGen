@@ -497,7 +497,6 @@ SHADER_PICKS = [
     #   Paper Layers -- cut-paper depth: stacked ridges at different parallax
     #                   speeds, each shadowing the one behind.
     "Ink Bloom", "Wind Wheat", "Velvet Nap", "Oil Film", "Frost Growth",
-    "Paper Layers",
     # NOT "Circle Tunnel" / "Zoom Loop" -- both declare a `color` TYPE ISF
     # input (POINT_COLOR_A/B, colorInput) with no `uColMode`-style palette
     # fallback, so isf_shader.py correctly leaves it unset ("color" inputs
@@ -575,6 +574,13 @@ SHADER_PICKS = [
     "Argyle March", "Tartan Shift", "Sequin Flip", "Crackle Glaze",
     "Chromatophore", "Caustic Pool", "Halftone Pulse", "Ribbon Braid",
     "Zoetrope Slats", "Moire Rings",
+    # NOT "Paper Layers": rendered alone on a matrix it draws a hard horizontal
+    # seam across the middle -- rows 7-8 of 16 carry a completely different
+    # structure from the smooth gradient above and below, which is the "bottom
+    # half is a mostly solid shape and the upper half has a shader" that Krists
+    # asked twice to remove (The WhatsApp Shakespeare 0:39 and 1:55). The
+    # earlier split test missed it because it compared half-MEANS, and a band
+    # in the middle leaves both halves equal.
 ]
 
 
@@ -804,7 +810,7 @@ NEW_SHADER_STEMS = ("aurora_curtain", "ripple_grid", "drift_cells", "falling_emb
                     "rain_on_glass", "cable_knit", "murmuration", "stained_glass",
                     "lava_lamp", "smoke_drift",
                     "ink_bloom", "wind_wheat", "velvet_nap", "oil_film",
-                    "frost_growth", "paper_layers")
+                    "frost_growth")
 # NOTHING custom goes in the house bed. Slow Dawn was designed for it -- one
 # slow gradient front, no repeating structure -- and it STILL took 12 to 12
 # from a 15% red peak to 39.8% in one build, the identical failure mode the
@@ -2416,6 +2422,14 @@ SAFE_LARGE_WEIGHTED = [*SHADER_KEYS, *SHADER_KEYS,
                        "spirals", "plasma_organic"]
 
 
+def _is_flood(target: dict) -> bool:
+    """Floods, including via the group that broadcasts to them."""
+    nm = (target.get("name") or "").lower()
+    if "flood" in nm:
+        return True
+    return any("flood" in (m or "").lower() for m in (target.get("members") or []))
+
+
 def prominence_of(t: dict) -> int:
     """How recognisable is this prop to someone standing in the street?
 
@@ -3079,10 +3093,30 @@ def main():
         # pool edit would leave whichever path was missed still placing it.
         # It stays available to cones, trees and curtains, where it wraps
         # rather than mottles.
-        if key == "plasma_organic" and (
-                target.get("cat") == "matrix"
-                or "matrix" in target.get("name", "").lower()):
+        # PLASMA IS RETIRED. It was first removed from matrices; it then turned
+        # up on the Garage Roof at Gooey 3:30 and was flagged again ("I want to
+        # get rid of that effect"). Two complaints, never once praised, and the
+        # library now carries 51 shaders that cover the same mottled-texture
+        # ground better -- so it goes everywhere rather than being chased from
+        # one prop family to the next.
+        if key == "plasma_organic":
             key = SHADER_KEYS[0] if SHADER_KEYS else "chase_mid_out"
+        # A FLOOD IS ONE PIXEL. Measured: every flood in this show is 3
+        # channels -- a single RGB node. It has no spatial extent, so a shader,
+        # a Shockwave, Spirals or a chase placed on it cannot render as a
+        # pattern; it renders as that pattern's brightness over time, sampled
+        # at one point. That is flicker, and at shader speed it is fast
+        # flicker: Gooey measured 2521 flood turn-ons with 52% of the gaps
+        # shorter than a quarter note, while the flood-discipline pass -- which
+        # counts EFFECTS -- saw nothing wrong and dropped 5.
+        #
+        # "The floods are doing a lot of strobing and rapid flashing... I
+        # thought we had already ensured the floods would never go faster than
+        # quarter or half notes", and floods "can give people migraines".
+        # A flood can express exactly two things, colour and brightness, so it
+        # gets a flat wash and nothing else.
+        if _is_flood(target) and key not in FLAT_KEYS:
+            key = "wash"
         """Place on the target's own name, UNLESS it's synthetic (not a real
         xLights model/group -- see build_cast's leftover-prefix step), in
         which case broadcast to every member individually so nothing ends up
@@ -8192,7 +8226,11 @@ def main():
     # Per PROP, so a chase travelling across many props at speed is untouched;
     # what is capped is one prop flashing at the viewer.
     _MIN_FLASH_GAP_MS = 240             # ~4 flashes/second
-    _FLOOD_FLASH_GAP_MS = 400           # floods get more room: big, bright, close
+    # A QUARTER NOTE, not a fixed 400ms. The rule Krists set is musical --
+    # "the floods would never go faster than quarter or half notes" -- and 400ms
+    # is faster than a quarter note on anything under 150 BPM, so on Gooey (86
+    # BPM, 697ms) the cap was letting through exactly what it existed to stop.
+    _FLOOD_FLASH_GAP_MS = max(400, int(60000.0 / max(analysis.beats.tempo, 60.0)))
     # A parent-level cap was tried and reverted: it dropped 2286 flashes
     # instead of 737 and removed none of the remaining fast runs, because
     # those turned out not to be flashes at all -- see the house-bed note in
@@ -8368,9 +8406,27 @@ def main():
     # found plus the section boundaries; a start within 600ms of one snaps to
     # it, which is close enough to be the same intended moment and far enough
     # not to drag a start across to a different chord.
+    # Section boundaries are NOT on the beat. Measured on Gooey: the detected
+    # section starts sit a median of 187ms from the nearest beat, 95% of them
+    # more than 40ms off, the worst 840ms off. Snapping a shader onto the raw
+    # section time therefore pulled it OFF the beat -- "the shaders change
+    # slightly off the main beat or section changes, seems like it's often a
+    # little bit after the section change."
+    #
+    # The generator already snaps downbeats onto the beat grid for exactly this
+    # reason; this pass was bypassing that and undoing it. Section anchors are
+    # now snapped to the nearest beat first. Chord anchors are left alone --
+    # those are measured onsets, so they ARE where the music is.
+    _bt = np.asarray(analysis.beats.beat_times, dtype=float)
+
+    def _on_beat(x: float) -> float:
+        if _bt.size == 0:
+            return x
+        return float(_bt[int(np.argmin(np.abs(_bt - x)))])
+
     _anchors = sorted(
         [t for _ap in ambient_passages for t in _ap.get("sparse", [])]
-        + [sec.start_time for sec in analysis.sections])
+        + [_on_beat(sec.start_time) for sec in analysis.sections])
     _snapped = 0
     if _anchors:
         import bisect as _bisect
@@ -8383,7 +8439,19 @@ def main():
                          if 0 <= k < len(_anchors)),
                         key=lambda x: abs(x - _t), default=None)
             if _best is not None and abs(_best - _t) <= 0.6:
-                _ms = int(_best * 1000)
+                _ms = int(_on_beat(_best) * 1000)
+                if _ms < _e.end_time_ms - 400:
+                    _e.start_time_ms = _ms
+                    _snapped += 1
+                    continue
+            # Not near a chord or a section, but still a hair off the grid:
+            # a dozen passes compute their own times and the rounding drifts.
+            # Moving a start by under an eighth of a beat can only improve
+            # alignment, and a shader change landing ON the beat is most of
+            # what makes it read as intentional.
+            _nb = _on_beat(_t)
+            if 0 < abs(_nb - _t) <= 0.12:
+                _ms = int(_nb * 1000)
                 if _ms < _e.end_time_ms - 400:
                     _e.start_time_ms = _ms
                     _snapped += 1
@@ -8500,6 +8568,32 @@ def main():
           f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
           f"effects on it do not render)")
 
+    # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
+    #
+    # The substitution in add_target caught the effects that route through it
+    # and missed 181 Shockwaves that several passes place with a direct add().
+    # Rather than chase every caller, this converts whatever is left: a flood
+    # is a single RGB node, so a Shockwave on it is not a ring, it is that
+    # ring's brightness sampled at one point -- flicker.
+    #
+    # Converted rather than dropped, so the flood still marks the moment; it
+    # just marks it by lighting and fading instead of by flickering.
+    _flat_ok = {"On", "Off", "Color Wash"}
+    _conv = 0
+    for _e in effects:
+        if "flood" not in _e.model_name.lower() or _e.effect_name in _flat_ok:
+            continue
+        _fi = _e.settings.get("T_TEXTCTRL_Fadein", "0.10")
+        _fo = _e.settings.get("T_TEXTCTRL_Fadeout", "0.60")
+        _e.effect_name = "Color Wash"
+        _e.settings = {"B_CHOICE_BufferStyle": "Per Model Default",
+                       "E_CHECKBOX_ColorWash_HFade": "1",
+                       "T_TEXTCTRL_Fadein": _fi, "T_TEXTCTRL_Fadeout": _fo}
+        _conv += 1
+    if _conv:
+        print(f"Floods: {_conv} spatial effects converted to a flat wash "
+              f"(a flood is one pixel -- motion on it can only be flicker)")
+
     # =====================================================================
     # Pulse-rate ceiling, enforced on the CURVES themselves.
     #
@@ -8515,6 +8609,12 @@ def main():
     # should do that", and on the floods specifically: "it can give people
     # migraines." 240ms is the same ceiling the effect-spacing pass uses.
     _MIN_PT_S = 0.24
+    # Floods get the musical limit, not the safety limit. 240ms is four
+    # pulses a second, which is faster than a quarter note on every song in
+    # this show -- fine for a prop with shape, far too fast for a single-pixel
+    # flood that can only express brightness. "The floods would never go
+    # faster than quarter or half notes."
+    _QUARTER_S = 60.0 / max(analysis.beats.tempo, 60.0)
     _fixed = 0
     for _e in effects:
         _pal = _e.palette
@@ -8530,6 +8630,8 @@ def main():
         _dur = (_e.end_time_ms - _e.start_time_ms) / 1000.0
         if _dur <= 0:
             continue
+        _limit = (max(_MIN_PT_S, _QUARTER_S)
+                  if "flood" in _e.model_name.lower() else _MIN_PT_S)
         try:
             _pts = [(float(a), float(b)) for a, b in
                     (x.split(":") for x in _m.group(1).split(";") if ":" in x)]
@@ -8540,10 +8642,10 @@ def main():
         _pts.sort()
         _keep, _last_t = [_pts[0]], _pts[0][0]
         for _t, _v in _pts[1:-1]:
-            if (_t - _last_t) * _dur >= _MIN_PT_S:
+            if (_t - _last_t) * _dur >= _limit:
                 _keep.append((_t, _v))
                 _last_t = _t
-        if (_pts[-1][0] - _last_t) * _dur >= _MIN_PT_S or len(_keep) == 1:
+        if (_pts[-1][0] - _last_t) * _dur >= _limit or len(_keep) == 1:
             _keep.append(_pts[-1])
         if len(_keep) == len(_pts):
             continue
@@ -8578,6 +8680,11 @@ def main():
         if "matrix" in _n.lower() and "tunnel" not in _n.lower() and "/" not in _n \
                 and _e.effect_name in ("Shader", "Plasma", "Spirals"):
             _tex_spans[_n].append((_e.start_time_ms, _e.end_time_ms))
+    # FLAT FILLS ONLY. This was briefly broadened to every effect on a matrix
+    # submodel, which was wrong on both counts: it did not fix the band (that
+    # was the Paper Layers shader, see SHADER_PICKS) and it removed movement
+    # that is wanted -- "the single strand chases on outlines is a desired
+    # effect, it gives movement we want".
     _slab = []
     for _e in effects:
         _n = _e.model_name
