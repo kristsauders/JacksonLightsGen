@@ -8627,7 +8627,7 @@ def main():
     _probe("before write")
 
 
-    # BIG CANVASES ARE NEVER LEFT BARE.
+    # A CANVAS MAY BE DARK. IT MAY NOT BE A FLAT WASH OF ONE COLOUR.
     #
     # "At 2:11 much of the house is just blue, it's a bit too much and too
     # simple, something might be missing... at 2:39-2:46 the matrices are all
@@ -8641,6 +8641,24 @@ def main():
     # This is not new -- the same hole is in builds from before this round --
     # but it only became visible once the brightness-curve fix made everything
     # actually render.
+    #
+    # The first version of this filled any canvas carrying no effect of its
+    # own, which was wrong: "canvases can be left bare when in an ambient or
+    # quieter passage or before a drop, but not filled with a single basic
+    # color and nothing else -- the problem was that they were just blue, not
+    # that they were off at some appropriate moments."
+    #
+    # Being dark IS the effect in a hush, and refilling those moments cost
+    # This Version of You most of its shape: the first big drum hit fell from
+    # x1.38 over its run-up to x1.15, and the final dropout -- which clears
+    # everything but the outlines -- went from leaving 30% of the pre-dropout
+    # level to leaving 83%, because this pass ran afterwards and put the
+    # canvases straight back.
+    #
+    # So the trigger is being LIT AND FEATURELESS, not being empty: a canvas
+    # covered by the whole-house span (which hands each prop a near-constant
+    # crop) while having nothing of its own. A canvas covered by nothing at all
+    # is dark on purpose and is left alone.
     #
     # One shader per hole, shared by every canvas in it, so they still read as
     # doing the same thing.
@@ -8685,6 +8703,16 @@ def main():
         return sum(1 for _n, _sp in _own_by_name.items()
                    if any(a <= ms < b for a, b in _sp))
 
+    _span_cover = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                         if e.model_name == HOUSE_GROUP)
+
+    def _lit_by_span(a: int, b: int) -> bool:
+        """Is this stretch mostly covered by the whole-house span?"""
+        if not _span_cover:
+            return False
+        hit = sum(max(0, min(b, y) - max(a, x)) for x, y in _span_cover)
+        return hit >= 0.6 * max(b - a, 1)
+
     _filled = 0
     _hole_key: dict[int, str] = {}
     for _t in _big_targets:
@@ -8707,6 +8735,8 @@ def main():
             if any(_h0 < _wb * 1000 and _wa * 1000 < _h1
                    for _wa, _wb in blackout_windows):
                 continue
+            if not _lit_by_span(_h0, _h1):
+                continue            # dark on purpose -- leave it dark
             if (_h1 - _h0) < _BARE_ALONE_S * 1000 and \
                     _n_textured((_h0 + _h1) // 2) < len(_big_targets) // 2:
                 continue
@@ -8771,6 +8801,8 @@ def main():
                 _runs.append([_ms, _ms])
         for _a, _b in _runs:
             if _b - _a < 2000:                 # too brief to be a hole
+                continue
+            if not _lit_by_span(_a, _b + _step):
                 continue
             _si = next((i for i, sec in enumerate(analysis.sections)
                         if sec.start_time <= _a / 1000.0 < sec.end_time), 0)
