@@ -8427,6 +8427,30 @@ def main():
             return x
         return float(_bt[int(np.argmin(np.abs(_bt - x)))])
 
+    # DROPS OUTRANK EVERYTHING. A drop is the moment the whole look is
+    # supposed to change, and a shader arriving even a beat late reads as a
+    # mistake in a way that a slightly-off section change does not. Measured on
+    # Gooey: the energy drops sit at 59.93s and 181.32s -- exactly the 1:00 and
+    # 3:01 Krists named -- while the shader changed at 62.27s and 183.11s,
+    # 2.3s and 1.8s late. That is far outside the 600ms window the chord and
+    # section anchors use, so no amount of tightening those would have caught
+    # it; drops need their own, much wider pull.
+    _drop_anchors = sorted({
+        _on_beat(_t) for _k in ("energy_drops", "predrop_cutouts")
+        for _ev in (cues.get(_k) or [])
+        for _t in ((_ev.get("drop_time") or _ev.get("time")),)
+        if _t})
+    _DROP_PULL_S = 2.5
+
+    def _snap_start(ms: int) -> int:
+        """Pull a start onto a drop, else onto the beat grid."""
+        _x = ms / 1000.0
+        _d = min(_drop_anchors, key=lambda a: abs(a - _x), default=None)
+        if _d is not None and abs(_d - _x) <= _DROP_PULL_S:
+            return int(_d * 1000)
+        _b = _on_beat(_x)
+        return int(_b * 1000) if abs(_b - _x) <= 0.25 else ms
+
     _anchors = sorted(
         [t for _ap in ambient_passages for t in _ap.get("sparse", [])]
         + [_on_beat(sec.start_time) for sec in analysis.sections])
@@ -8437,6 +8461,14 @@ def main():
             if _e.effect_name != "Shader":
                 continue
             _t = _e.start_time_ms / 1000.0
+            # A drop within _DROP_PULL_S wins outright.
+            _dnear = min(_drop_anchors, key=lambda x: abs(x - _t), default=None)
+            if _dnear is not None and abs(_dnear - _t) <= _DROP_PULL_S:
+                _ms = int(_dnear * 1000)
+                if _ms < _e.end_time_ms - 400:
+                    _e.start_time_ms = _ms
+                    _snapped += 1
+                    continue
             _j = _bisect.bisect_left(_anchors, _t)
             _best = min((_anchors[k] for k in (_j - 1, _j)
                          if 0 <= k < len(_anchors)),
@@ -8458,6 +8490,7 @@ def main():
                 if _ms < _e.end_time_ms - 400:
                     _e.start_time_ms = _ms
                     _snapped += 1
+
     _by_prop: dict[str, list] = {}
     for _e in effects:
         if _e.effect_name == "Shader":
@@ -8518,58 +8551,6 @@ def main():
 
     _probe("before write")
 
-    # =====================================================================
-    # Same-layer overlap resolution -- MUST be last, after every pass that
-    # can move or lengthen an effect.
-    #
-    # An xLights EffectLayer is a single timeline: two effects cannot occupy
-    # the same milliseconds on it. 21% of the effects in this song were doing
-    # exactly that, because a dozen passes each place effects independently
-    # and none of them could see the others. The chord gestures were the
-    # clearest casualty -- three washes on Corner Verticals L1 at 26.43-29.02,
-    # 27.23-29.82 and 28.85-31.45, each correct on its own, together
-    # unrenderable, which is why those props measured DARK in the .fseq while
-    # the .xsq looked right. This is almost certainly why several rounds of
-    # fixes have measured inert: the change was real in the file and never
-    # reached the pixels.
-    #
-    # Resolution moves the LATER effect up a layer, which is both what the eye
-    # expects (the newer event paints over the older) and what preserves the
-    # long decay tails that make a chord ring. Truncation is the fallback for
-    # when there is genuinely no free layer.
-    _MAX_LAYER = 12
-    _lanes: dict[tuple[str, int], list] = {}
-    for _e in effects:
-        _lanes.setdefault((_e.model_name, _e.layer), []).append(_e)
-    _moved = _cut = 0
-    _busy = {k: sorted((e.start_time_ms, e.end_time_ms) for e in v)
-             for k, v in _lanes.items()}
-    for (_mn, _lay), _row in sorted(_lanes.items()):
-        _row.sort(key=lambda e: (e.start_time_ms, e.end_time_ms))
-        _end = None
-        for _e in _row:
-            if _end is not None and _e.start_time_ms < _end:
-                _dest = None
-                for _l2 in range(_lay + 1, _MAX_LAYER):
-                    _occ = _busy.get((_mn, _l2), [])
-                    if not any(_e.start_time_ms < _b and _a < _e.end_time_ms
-                               for _a, _b in _occ):
-                        _dest = _l2
-                        break
-                if _dest is not None:
-                    _busy.setdefault((_mn, _dest), []).append(
-                        (_e.start_time_ms, _e.end_time_ms))
-                    _e.layer = _dest
-                    _moved += 1
-                    continue
-                _e.start_time_ms = _end
-                _cut += 1
-                if _e.end_time_ms - _e.start_time_ms < 200:
-                    _e.end_time_ms = _e.start_time_ms + 200
-            _end = max(_end or 0, _e.end_time_ms)
-    print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
-          f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
-          f"effects on it do not render)")
 
     # BIG CANVASES ARE NEVER LEFT BARE.
     #
@@ -8663,7 +8644,15 @@ def main():
             if _bucket not in _hole_key:
                 _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
                                       else "wash")
-            add_target(_t, L_BASE, _hole_key[_bucket], _h0, _h1, _pal)
+            # The fill runs AFTER the shader-dwell snap, so it has to place
+            # itself on the grid rather than rely on being corrected later.
+            # Measured on Gooey: this pass was the thing putting the 1:00
+            # shader change at 62.27s -- 2.3s past the drop -- while the drop
+            # itself had been snapped correctly everywhere else.
+            _s0 = _snap_start(_h0)
+            if _s0 >= _h1 - 500:
+                _s0 = _h0
+            add_target(_t, L_BASE, _hole_key[_bucket], _s0, _h1, _pal)
             _filled += 1
     if _filled:
         print(f"Bare-canvas fill: {_filled} stretches longer than "
@@ -8717,7 +8706,10 @@ def main():
             if _bucket not in _hole_key:
                 _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
                                       else "wash")
-            add_target(_t, L_BASE, _hole_key[_bucket], _a, _b + _step, _pal)
+            _a2 = _snap_start(_a)
+            if _a2 >= _b:
+                _a2 = _a
+            add_target(_t, L_BASE, _hole_key[_bucket], _a2, _b + _step, _pal)
             _cohered += 1
     if _cohered:
         print(f"Canvas cohesion: {_cohered} stretches where one big prop was "
@@ -8871,6 +8863,100 @@ def main():
         effects = [e for e in effects if id(e) not in _ids]
         print(f"Sliver effects: {len(_slivers)} removed "
               f"(shorter than {_SLIVER_MS}ms -- one to four frames)")
+
+    # These two run LAST, after the bare-canvas and cohesion fills, because
+    # those passes ADD effects. Running them earlier meant a shader the fill
+    # placed on a drop never had the outgoing shader cut from under it --
+    # Gooey 3:01, where Circuit Trace started dead on the drop while
+    # Herringbone ran on for another 1.7s -- and meant fill-created effects
+    # never had their same-layer overlaps resolved at all.
+
+    # A SHADER CHANGE ON A DROP IS A REPLACEMENT, NOT AN ADDITION.
+    #
+    # The layer-overlap pass lifts a later effect onto a free layer rather than
+    # truncating the earlier one, which is right for decay tails and wrong for
+    # a shader change: the new shader starts exactly on the drop while the old
+    # one keeps running underneath, so the two blend and the change reads as
+    # late even though it began on time. Measured on Gooey at 3:01: Circuit
+    # Trace started dead on the drop at 181.37 while Herringbone ran on until
+    # 183.10 -- 1.7s of both at once.
+    _cut_late = 0
+    _anchor_set = sorted(set(_drop_anchors)
+                         | {_on_beat(sec.start_time) for sec in analysis.sections})
+    _prop_sh: dict[str, list] = {}
+    for _e in effects:
+        if _e.effect_name == "Shader":
+            _prop_sh.setdefault(_e.model_name, []).append(_e)
+    for _row in _prop_sh.values():
+        _row.sort(key=lambda e: e.start_time_ms)
+        for _i, _new in enumerate(_row):
+            # NOT `_bt` -- that name holds the beat-times array this whole
+            # block closes over, and reusing it here silently replaced the
+            # array with a float.
+            _nstart = _new.start_time_ms / 1000.0
+            if not any(abs(_nstart - _a) <= 0.06 for _a in _anchor_set):
+                continue
+            for _old in _row[:_i]:
+                if _old.end_time_ms > _new.start_time_ms \
+                        and _old.start_time_ms < _new.start_time_ms:
+                    _old.end_time_ms = _new.start_time_ms
+                    _cut_late += 1
+    if _cut_late:
+        print(f"Shader replacement: {_cut_late} outgoing shaders cut at the "
+              f"drop or section change instead of running on underneath")
+
+    # =====================================================================
+    # Same-layer overlap resolution -- MUST be last, after every pass that
+    # can move or lengthen an effect.
+    #
+    # An xLights EffectLayer is a single timeline: two effects cannot occupy
+    # the same milliseconds on it. 21% of the effects in this song were doing
+    # exactly that, because a dozen passes each place effects independently
+    # and none of them could see the others. The chord gestures were the
+    # clearest casualty -- three washes on Corner Verticals L1 at 26.43-29.02,
+    # 27.23-29.82 and 28.85-31.45, each correct on its own, together
+    # unrenderable, which is why those props measured DARK in the .fseq while
+    # the .xsq looked right. This is almost certainly why several rounds of
+    # fixes have measured inert: the change was real in the file and never
+    # reached the pixels.
+    #
+    # Resolution moves the LATER effect up a layer, which is both what the eye
+    # expects (the newer event paints over the older) and what preserves the
+    # long decay tails that make a chord ring. Truncation is the fallback for
+    # when there is genuinely no free layer.
+    _MAX_LAYER = 12
+    _lanes: dict[tuple[str, int], list] = {}
+    for _e in effects:
+        _lanes.setdefault((_e.model_name, _e.layer), []).append(_e)
+    _moved = _cut = 0
+    _busy = {k: sorted((e.start_time_ms, e.end_time_ms) for e in v)
+             for k, v in _lanes.items()}
+    for (_mn, _lay), _row in sorted(_lanes.items()):
+        _row.sort(key=lambda e: (e.start_time_ms, e.end_time_ms))
+        _end = None
+        for _e in _row:
+            if _end is not None and _e.start_time_ms < _end:
+                _dest = None
+                for _l2 in range(_lay + 1, _MAX_LAYER):
+                    _occ = _busy.get((_mn, _l2), [])
+                    if not any(_e.start_time_ms < _b and _a < _e.end_time_ms
+                               for _a, _b in _occ):
+                        _dest = _l2
+                        break
+                if _dest is not None:
+                    _busy.setdefault((_mn, _dest), []).append(
+                        (_e.start_time_ms, _e.end_time_ms))
+                    _e.layer = _dest
+                    _moved += 1
+                    continue
+                _e.start_time_ms = _end
+                _cut += 1
+                if _e.end_time_ms - _e.start_time_ms < 200:
+                    _e.end_time_ms = _e.start_time_ms + 200
+            _end = max(_end or 0, _e.end_time_ms)
+    print(f"Layer overlaps: {_moved} effects lifted to a free layer, "
+          f"{_cut} trimmed (an xLights layer is one timeline -- overlapping "
+          f"effects on it do not render)")
 
     _mirror = [e for e in effects if e.model_name == TUNNEL_MIRROR_SRC]
     if _mirror:
