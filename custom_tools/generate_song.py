@@ -228,7 +228,8 @@ def _wave(direction: str) -> dict:
     }
 
 
-def _bars(direction: str, cycles: str = "1.0", buffer: dict | None = None) -> dict:
+def _bars(direction: str, cycles: str = "1", buffer: dict | None = None,
+          bars: str = "1", highlight: str = "0") -> dict:
     # NOTE the default buffer here is PERPROP ("As Pixel"), which makes each
     # MODEL a single pixel -- so the bar travels ACROSS the group's members,
     # not along each member's own geometry. That's right for a cross-prop
@@ -241,8 +242,8 @@ def _bars(direction: str, cycles: str = "1.0", buffer: dict | None = None) -> di
     return {
         **(buffer if buffer is not None else PERPROP),
         "E_CHECKBOX_Bars_3D": "0", "E_CHECKBOX_Bars_Gradient": "0",
-        "E_CHECKBOX_Bars_Highlight": "0", "E_CHOICE_Bars_Direction": direction,
-        "E_SLIDER_Bars_BarCount": "1", "E_TEXTCTRL_Bars_Cycles": cycles,
+        "E_CHECKBOX_Bars_Highlight": highlight, "E_CHOICE_Bars_Direction": direction,
+        "E_SLIDER_Bars_BarCount": bars, "E_TEXTCTRL_Bars_Cycles": cycles,
     }
 
 
@@ -300,6 +301,27 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     # see the note in _bars().
     "bars_up_in":     ("Bars", _bars("up", buffer=PERMODEL)),
     "bars_down_in":   ("Bars", _bars("down", buffer=PERMODEL)),
+    # --- rhythmic bars, from Krists's own sequences -------------------------
+    # He uses Alternate Up/Down (37 each), which REVERSES the bar's direction
+    # on every cycle -- so with the cycle rate locked to the beat, the bar
+    # changes direction on the beat. That is the "moved fast and then slowed
+    # down on the next beat, or the speed changed back and forth" effect, and
+    # it needs both halves: the alternating direction AND a beat-derived cycle
+    # count. This generator had neither.
+    "bars_alt_up":    ("Bars", _bars("Alternate Up", buffer=PERMODEL)),
+    "bars_alt_down":  ("Bars", _bars("Alternate Down", buffer=PERMODEL)),
+    # ORIENTATION, not just direction: expand/compress open from the middle
+    # outward, H-expand/H-compress do the same on the other axis. 313 uses
+    # between them in his sequences against none here.
+    "bars_expand":    ("Bars", _bars("expand", buffer=PERMODEL)),
+    "bars_compress":  ("Bars", _bars("compress", buffer=PERMODEL)),
+    "bars_hexpand":   ("Bars", _bars("H-expand", buffer=PERMODEL)),
+    "bars_hcompress": ("Bars", _bars("H-compress", buffer=PERMODEL)),
+    # Several bars at once, and the highlighted leading edge he uses on the
+    # up/down sweeps -- a brighter front makes the direction legible.
+    "bars_three":     ("Bars", _bars("expand", buffer=PERMODEL, bars="3")),
+    "bars_two_up":    ("Bars", _bars("up", buffer=PERMODEL, bars="2",
+                                     highlight="1")),
     # Travel ALONG each strand (physically up/down on a vertical strip).
     # `Bounce from Left` does the out-and-back in a single effect, which is
     # what v5 used and what reads as a strip pulsing up and down.
@@ -2793,7 +2815,8 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
             return rng.choice(["chase_mid_out", "ripple_hex_in", "pinwheel_sweep",
                                *SHADER_KEYS])
         return rng.choice(["chase_lr", "chase_rl", "wash",
-                           "ripple_hex_in", "ripple_hex_out", "pinwheel_sweep"])
+                           "ripple_hex_in", "ripple_hex_out", "pinwheel_sweep",
+                           "bars_expand", "bars_hexpand", "bars_alt_up"])
     if cat == "tree":
         return rng.choice(["chase_mid_out", "meteors_down", "spirals",
                            "chase_bounce_drift"])
@@ -2824,6 +2847,7 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
             # idea drawn as spokes rather than rings.
             "ripple_hex_in", "ripple_hex_out", "ripple_rays",
             "chase_bounce_pp", "chase_spark",
+            "bars_alt_up", "bars_alt_down", "bars_expand", "bars_hexpand",
         ])
     if n >= 4:
         return rng.choice(["sweep_right", "sweep_left"] if wide else ["sweep_up", "sweep_down"])
@@ -6083,7 +6107,10 @@ def main():
             # middle traces the prop instead of blanking it.
             return _r.choice(["shockwave", "shockwave", "shockwave",
                               "ripple_hex_in", "ripple_hex_out", "ripple_rays",
-                              "pinwheel", "on_pop", "on_pop"])
+                              "pinwheel", "on_pop", "on_pop",
+                              # Bars that reverse on the beat, and that open
+                              # from the middle rather than sweeping past.
+                              "bars_alt_up", "bars_expand", "bars_three"])
         # THE DEFAULT IS MOVEMENT, NOT A FLASH.
         #
         # This fallback produced 81% of every `On` in the song, and what it
@@ -9266,6 +9293,156 @@ def main():
                   f"flat while the rest were textured")
         return effects
 
+    def _g_bars_discipline(effects):
+        """Bars land on the beat, last a bar, and fade rather than stop.
+
+        "We're often using the diagonal bars effect very briefly, like on a
+        section change it comes on for a second or two and then turns off...
+        it's awkward how it turns off suddenly, and it often starts off the
+        beat too. Let's make sure we're only doing that sparingly and make sure
+        it's on the beat and either lasts longer or fades out."
+
+        Measured on Gooey before this: 369 Bars, only 48% within 40ms of a
+        beat, a tenth of them under 0.25s, and 359 of 369 with NO fade-out at
+        all -- they simply stopped.
+        """
+        _bar_ms = int(4 * 60000.0 / max(analysis.beats.tempo, 60.0))
+        _bt = np.asarray(analysis.beats.beat_times, dtype=float)
+        _snapped = _lengthened = _faded = _dropped = 0
+        _keep = []
+        _last_by_prop: dict[str, int] = {}
+        for _e in sorted(effects, key=lambda x: x.start_time_ms):
+            if _e.effect_name != "Bars":
+                _keep.append(_e)
+                continue
+            # On the beat.
+            if _bt.size:
+                _t = _e.start_time_ms / 1000.0
+                _nb = float(_bt[int(np.argmin(np.abs(_bt - _t)))])
+                if 0 < abs(_nb - _t) <= 0.30 and int(_nb * 1000) < _e.end_time_ms - 200:
+                    _e.start_time_ms = int(_nb * 1000)
+                    _snapped += 1
+            # SPARINGLY: one per prop per bar. A second bars sweep arriving on
+            # the same prop before the first has had a bar to read is what
+            # makes them feel like flicker rather than a gesture.
+            _prev = _last_by_prop.get(_e.model_name)
+            if _prev is not None and _e.start_time_ms - _prev < _bar_ms:
+                _dropped += 1
+                continue
+            _last_by_prop[_e.model_name] = _e.start_time_ms
+            # Long enough to read: at least one bar, where there is room.
+            if _e.end_time_ms - _e.start_time_ms < _bar_ms:
+                _e.end_time_ms = _e.start_time_ms + _bar_ms
+                _lengthened += 1
+            # And a decay, so it leaves rather than stops.
+            if "T_TEXTCTRL_Fadeout" not in _e.settings:
+                _span_s = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+                _e.settings = {**_e.settings,
+                               "T_TEXTCTRL_Fadeout": f"{min(1.6, _span_s * 0.45):.2f}"}
+                _faded += 1
+            _keep.append(_e)
+        if _snapped or _dropped or _lengthened or _faded:
+            print(f"Bars discipline: {_snapped} snapped to the beat, "
+                  f"{_lengthened} lengthened to a bar, {_faded} given a fade, "
+                  f"{_dropped} dropped as too soon after another on the same prop")
+        return _keep
+
+    def _g_beat_lock_motion(effects):
+        """Tie repeating motion to the beat grid, from each effect's FINAL span.
+
+        This is the mechanism Krists's own sequences use and this generator
+        did not. `E_TEXTCTRL_Bars_Cycles` is the number of times the bar
+        crosses WITHIN the effect's own span -- so a bar that moves on the beat
+        is simply cycles = span-in-beats, and one that moves on the half note
+        is span-in-beats / 2. His Bars carry Cycles of 16.0, 2, 1 and 0.5
+        against this generator's hardcoded 1, which is why ours drift across a
+        span instead of stepping with the music.
+
+        Computing it here, at the end, means it uses the span the effect
+        actually ends up with -- the same reason the pulse ceiling lives here.
+
+        The unit ALTERNATES by bar: beat, beat, half-note, beat. "We had an
+        effect before where the diagonal bars moved fast and then slowed down
+        on the next beat, or the speed changed back and forth on the half
+        notes." That alternation is the effect; a constant rate is just a rate.
+        """
+        _beat_s = 60.0 / max(analysis.beats.tempo, 60.0)
+        _bar_s = 4 * _beat_s
+        _n = 0
+        for _e in effects:
+            if _e.effect_name != "Bars":
+                continue
+            _span = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+            if _span < _beat_s:
+                continue
+            _beats = _span / _beat_s
+            _bar_i = int((_e.start_time_ms / 1000.0) / _bar_s)
+            _unit = (1.0, 1.0, 2.0, 1.0)[_bar_i % 4]      # beat / beat / half / beat
+            _cycles = max(1.0, round(_beats / _unit))
+            # A cap, not a target: past about one crossing per half-beat the
+            # bar stops reading as travel and starts reading as flicker.
+            _cycles = min(_cycles, max(1.0, round(_beats * 2)))
+            _new = {**_e.settings, "E_TEXTCTRL_Bars_Cycles": f"{_cycles:.1f}"}
+            # DIRECTION AND ORIENTATION CHANGE ON THE BEAT TOO. "The bars can
+            # also change direction on the beat, and they can also change
+            # orientation." xLights' Alternate Up/Down reverses on every
+            # cycle, so once the cycle rate is the beat, the bar reverses on
+            # the beat -- the two halves only work together.
+            #
+            # Only for bars living on ONE prop (Per Model Default). A spanning
+            # sweep across the facade is a directional gesture whose whole
+            # point is going one way, and alternating it would destroy that.
+            if _new.get("B_CHOICE_BufferStyle") == "Per Model Default":
+                _d = _new.get("E_CHOICE_Bars_Direction", "")
+                _pick = random.Random(f"bars|{_e.model_name}|{_bar_i}").random()
+                if _d in ("up", "down") and _pick < 0.5:
+                    _new["E_CHOICE_Bars_Direction"] = (
+                        "Alternate Up" if _d == "up" else "Alternate Down")
+                elif _d in ("Left", "Right") and _pick < 0.35:
+                    # Orientation: open from the middle instead of crossing.
+                    _new["E_CHOICE_Bars_Direction"] = (
+                        "expand" if _pick < 0.18 else "H-expand")
+            # SPEED THAT CHANGES ON THE BEAT. Krists puts a VALUE CURVE on
+            # Bars_Cycles -- one measured example ramps 30 to 141 crossings
+            # across four seconds -- which is how a bar can move fast and then
+            # slow down rather than running at one rate. Same encoding as the
+            # brightness curves: value x Max, here Max=300.
+            #
+            # Stepping between a fast and a slow rate on alternate beats is
+            # the "speed changed back and forth on the half notes" he
+            # remembers, and it cannot be expressed with a scalar at all.
+            if _span >= 2 * _beat_s and _new.get(
+                    "B_CHOICE_BufferStyle") == "Per Model Default" \
+                    and random.Random(f"cyc|{_e.model_name}|{_bar_i}").random() < 0.35:
+                # Capped at two crossings per beat. Unbounded doubling took
+                # Gooey from 6 strobe runs to 15: a bar already crossing 12
+                # times in its span became 24, which is not "fast", it is
+                # flicker.
+                _fast = min(_cycles * 2.0, max(2.0, _beats * 2.0))
+                _slow = max(1.0, _cycles * 0.5)
+                _pts = []
+                _nb = max(2, int(_beats))
+                for _i in range(_nb + 1):
+                    _t = min(1.0, _i / _nb)
+                    _v = (_fast if _i % 2 == 0 else _slow) / 300.0
+                    _pts.append(f"{_t:.3f}:{min(1.0, _v):.3f}")
+                _new["E_VALUECURVE_Bars_Cycles"] = (
+                    "Active=TRUE|Id=ID_VALUECURVE_Bars_Cycles|Type=Custom|"
+                    "Min=0.00|Max=300.00|RV=TRUE|Values=" + ";".join(_pts) + "|")
+            # TILT. "You can also change the orientation (like degrees tilted)
+            # on the beat too." A buffer rotation turns the bars diagonal;
+            # Krists uses Rotate CC 90 for this.
+            if _new.get("B_CHOICE_BufferStyle") == "Per Model Default" \
+                    and random.Random(f"tilt|{_e.model_name}|{_bar_i}").random() < 0.25:
+                _new["B_CHOICE_BufferTransform"] = "Rotate CC 90"
+            _e.settings = _new
+            _n += 1
+        if _n:
+            print(f"Beat-locked motion: {_n} bars effects given a crossing rate "
+                  f"derived from their own span (beat / half-note, alternating "
+                  f"by bar)")
+        return effects
+
     def _g_floods_flat(effects):
         # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
         #
@@ -9565,6 +9742,8 @@ def main():
     #     every other guard can move or lengthen an effect.
     LATE_GUARDS = [
         ("fill canvases lit flat by the house span", _g_fill_flat_canvases),
+        ("bars land on the beat and fade", _g_bars_discipline),
+        ("tie repeating motion to the beat grid", _g_beat_lock_motion),
         ("floods carry flat light only", _g_floods_flat),
         ("no solid slab on a textured matrix", _g_no_slab),
         ("drop sliver effects", _g_slivers),
