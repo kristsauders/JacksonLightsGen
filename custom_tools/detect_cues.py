@@ -341,19 +341,56 @@ def detect_energy_drops(rms: np.ndarray, rms_times: np.ndarray,
             "drop_time": float(rms_times[onset_i]),
             "drop_energy": after,
             "lift": float(after / before),
+            "tier": "major",
+        })
+
+    # A SECOND, SMALLER TIER. "Maybe we're not detecting some smaller drops
+    # that dip only a little and aren't necessarily big drops but are still
+    # important moments to accentuate." The thresholds above are deliberately
+    # strict -- 1.55x over four seconds, landing above 55% of peak -- and they
+    # find two moments in the whole of Gooey. A song has more turns than that.
+    #
+    # These are returned tagged rather than mixed in, so the generator can give
+    # them a proportionate response: a breath before, a change of look on the
+    # beat, but not the full blackout-and-hit staging a major drop gets.
+    for i in range(w, len(norm) - w):
+        before = float(norm[i - w:i].mean())
+        after = float(norm[i:i + w].mean())
+        if before < 1e-6 or after < 0.38:
+            continue
+        lift = after / before
+        if not (1.22 <= lift < ratio):
+            continue
+        back = max(0, i - w // 2)
+        seg = norm[back:i + 1]
+        hits = np.nonzero(seg >= after)[0]
+        onset_i = back + int(hits[0]) if len(hits) else i
+        events.append({
+            "drop_time": float(rms_times[onset_i]),
+            "drop_energy": after,
+            "lift": float(lift),
+            "tier": "minor",
         })
 
     # One drop per musical moment. The sliding window fires on many consecutive
     # frames across the same rise, and a chorus can also step up again a few
     # bars in; an 8s merge keeps the strongest of each cluster.
-    events.sort(key=lambda ev: ev["drop_time"])
+    # Merge within each tier, and never let a minor sit near a major -- the
+    # major IS that moment and a second marker beside it is the "other changes
+    # happening right before or after that distract from the main moment".
+    events.sort(key=lambda ev: (ev["drop_time"], ev["tier"] != "major"))
     merged: list[dict] = []
     for ev in events:
-        if merged and ev["drop_time"] - merged[-1]["drop_time"] < merge_gap_s:
-            if ev["lift"] > merged[-1]["lift"]:
-                merged[-1] = ev
-        else:
-            merged.append(ev)
+        near = next((m for m in merged
+                     if abs(m["drop_time"] - ev["drop_time"]) < merge_gap_s), None)
+        if near is not None:
+            if near["tier"] == ev["tier"] and ev["lift"] > near["lift"]:
+                near.update(ev)
+            elif near["tier"] == "minor" and ev["tier"] == "major":
+                near.update(ev)
+            continue
+        merged.append(dict(ev))
+    merged.sort(key=lambda ev: ev["drop_time"])
     return merged
 
 

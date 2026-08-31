@@ -7220,6 +7220,7 @@ def main():
         })
         n_dropouts += 1
     n_energy_drops = 0
+    MINOR_DROPS: list[float] = []
     for ev in cues.get("energy_drops", []):
         dt = float(ev["drop_time"])
         # Snap to the nearest downbeat within half a beat -- a drop lands on
@@ -7230,6 +7231,17 @@ def main():
                 dt = near
         # Skip anything the cutout detector already staged.
         if any(abs(dt - c["drop_time"]) < 6.0 for c in cutouts):
+            continue
+        # A MINOR DROP GETS A PROPORTIONATE RESPONSE, not the full staging.
+        # "Some smaller drops that dip only a little and aren't necessarily big
+        # drops but are still important moments to accentuate." Staging one
+        # like a major -- two beats of darkness, a full-house hit -- would make
+        # the song lurch every twenty seconds and steal from the real drops.
+        # It gets a shorter breath and takes its place as an anchor, so the
+        # look changes ON it, which is what makes a moment read as intended.
+        _minor = ev.get("tier") == "minor"
+        if _minor:
+            MINOR_DROPS.append(dt)
             continue
         dark = min(beat_ms / 1000.0, 0.6)
         cutouts.append({
@@ -7781,6 +7793,24 @@ def main():
             continue
         dip_windows.append((section.end_time - beat_ms / 1000.0,
                             section.end_time))
+    # ...AND BEFORE EVERY DROP. The dip was built from section ENDS only, so a
+    # drop that does not coincide with one got no breath before it at all.
+    # Measured on Gooey, seven of its ten drops had a run-up as bright as the
+    # passage they came out of (dip ratio 0.96-1.24, where a real hush is
+    # ~0.5): "sometimes there's not enough of a dropout first or a brightness
+    # change on the drop." A drop with nothing taken away beforehand has
+    # nowhere to rise from, however hard it is hit.
+    #
+    # A beat and a half rather than the section dip's one beat -- a drop is a
+    # bigger moment and wants a longer inhale before it.
+    for _dt in sorted(set(SNAPPED_DROPS)):
+        if _dt > bar_s:
+            dip_windows.append((_dt - 1.5 * beat_ms / 1000.0, _dt - 0.02))
+    # Minor drops get a breath too, just a shorter one -- one beat rather than
+    # a beat and a half.
+    for _dt in sorted(set(MINOR_DROPS)):
+        if _dt > bar_s:
+            dip_windows.append((_dt - beat_ms / 1000.0, _dt - 0.02))
     # The dip is deliberately PARTIAL for ordinary props -- a full cut reads
     # as a mistake rather than as a breath. But rolling that dice per EFFECT
     # meant the big canvases disagreed with each other: at any given section
@@ -8853,6 +8883,7 @@ def main():
     # each shader change take whichever is nearer, instead of one song's
     # correct answer overriding the other's.
     _drop_anchors = sorted({_on_beat(_t) for _t in SNAPPED_DROPS if _t}
+                           | {_on_beat(_t) for _t in MINOR_DROPS if _t}
                            | {_on_beat(_t)
                               for _k in ("energy_drops", "predrop_cutouts")
                               for _ev in (cues.get(_k) or [])
@@ -9122,8 +9153,16 @@ def main():
                 # Measured on Gooey: this pass was the thing putting the 1:00
                 # shader change at 62.27s -- 2.3s past the drop -- while the drop
                 # itself had been snapped correctly everywhere else.
+                # NEVER EARLIER. Snapping exists so a fill lands on the beat,
+                # but pulling one BACKWARDS puts it inside a moment already
+                # covered -- and the moment it reaches for is a drop, which is
+                # exactly where a canvas should show the hit and nothing else.
+                # Measured on Gooey's 1:00 drop: the hole began at 62.27,
+                # snapped back to 60.67, and laid a shader under the white drop
+                # hit. The matrices read 238 there before this pass existed and
+                # 86 after it.
                 _s0 = _snap_start(_h0)
-                if _s0 >= _h1 - 500:
+                if _s0 < _h0 or _s0 >= _h1 - 500:
                     _s0 = _h0
                 add_target(_t, L_BASE, _hole_key[_bucket], _s0, _h1, _pal)
                 _filled += 1
@@ -9182,7 +9221,7 @@ def main():
                     _hole_key[_bucket] = (rng.choice(SHADER_KEYS) if SHADER_KEYS
                                           else "wash")
                 _a2 = _snap_start(_a)
-                if _a2 >= _b:
+                if _a2 < _a or _a2 >= _b:
                     _a2 = _a
                 add_target(_t, L_BASE, _hole_key[_bucket], _a2, _b + _step, _pal)
                 _cohered += 1
