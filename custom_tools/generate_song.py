@@ -8138,7 +8138,14 @@ def main():
                 # on and decay puts the fade where the ear expects it: the hit
                 # lands at full, then the house falls away.
                 eff.end_time_ms = _cut_from + 1600
-                eff.settings = {**eff.settings, "T_TEXTCTRL_Fadeout": "1.5"}
+                # Marked so nothing lengthens it again. The shader-dwell
+                # minimum (4s) ran after this and stretched the whole-house
+                # bed from the 2.87s this leaves back out to a full 4s,
+                # relighting the entire facade 1.1s into the very dropout that
+                # had just cleared it -- which is why the last drum hit read as
+                # lackluster: the house never actually fell away.
+                eff.settings = {**eff.settings, "T_TEXTCTRL_Fadeout": "1.5",
+                                "X_TrimmedAtDropout": "1"}
                 _kept.append(eff)
                 continue
             _cut += 1
@@ -8532,6 +8539,8 @@ def main():
     # running on two layers of the SAME prop within a second of each other.
     # Every pass individually looked reasonable; the mess was emergent, so it
     # can only be fixed here, where the whole timeline is visible.
+    _fd_cut = (int(final_dropout * 1000) + 150
+               if final_dropout is not None else 0)
     _SHADER_MIN_DWELL_MS = 4000
     _SHADER_GAP_MS = 2500
     # A shader change is itself a musical event, so it belongs ON a chord
@@ -8669,12 +8678,21 @@ def main():
                 _e = _row[_i]
                 _nxt = _row[_i + 1] if _i + 1 < len(_row) else None
                 _span = _e.end_time_ms - _e.start_time_ms
-                if _span < _SHADER_MIN_DWELL_MS and not is_ambient_eff(_e):
+                if (_span < _SHADER_MIN_DWELL_MS and not is_ambient_eff(_e)
+                        and _e.settings.get("X_TrimmedAtDropout") != "1"):
                     # Too brief to register as anything but a blink. Prefer to
                     # LENGTHEN it into the hole ahead of it; only drop it if
                     # there is genuinely no room, so a deliberate accent on a
                     # hit survives as a longer version of itself.
                     _room = (_nxt.start_time_ms if _nxt else _e.end_time_ms + 99999)
+                    # NEVER LENGTHEN ACROSS THE FINAL DROPOUT. The whole-house
+                    # bed ended at 154.97 -- exactly the dropout cut -- and this
+                    # rule stretched it to its 4s minimum at 157.68, relighting
+                    # the entire facade straight through the last drum hit. The
+                    # minimum dwell exists so a shader is not a blink; it must
+                    # not override a deliberate clearing.
+                    if _fd_cut and _e.start_time_ms < _fd_cut:
+                        _room = min(_room, _fd_cut)
                     if _room - _e.start_time_ms >= _SHADER_MIN_DWELL_MS:
                         _e.end_time_ms = min(_room,
                                              _e.start_time_ms + _SHADER_MIN_DWELL_MS)
@@ -8688,7 +8706,15 @@ def main():
                         continue
                 # (c) close the holes: a shader going dark for under 2.5s and
                 #     being replaced reads as a glitch, not as a change.
-                if _nxt is not None and 0 < _nxt.start_time_ms - _e.end_time_ms <= _SHADER_GAP_MS:
+                # ...but never across a deliberate clearing. An effect the
+                # final dropout trimmed has been cut ON PURPOSE, and closing
+                # the gap after it just reinstates what was cleared -- this is
+                # what kept the whole-house bed alight through the last drum
+                # hit after the minimum-dwell rule had already been stopped
+                # from doing the same thing.
+                if (_nxt is not None
+                        and 0 < _nxt.start_time_ms - _e.end_time_ms <= _SHADER_GAP_MS
+                        and _e.settings.get("X_TrimmedAtDropout") != "1"):
                     _e.end_time_ms = _nxt.start_time_ms
                     _closed += 1
                 _i += 1
