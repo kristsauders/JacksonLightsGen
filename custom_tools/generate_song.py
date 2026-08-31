@@ -309,6 +309,25 @@ EFFECTS: dict[str, tuple[str, dict]] = {
                        {**_chase("Left-Right", span=False), **PMSL}),
     "strand_down":    ("SingleStrand",
                        {**_chase("Right-Left", span=False), **PMSL}),
+    # VARIETY THAT STAYS ON THE STRAND. The chase_*_pp keys added for outline
+    # groups use Per Model Per Preview, which is right for a group of separate
+    # props and WRONG for a single vertical strip: the strip's preview buffer
+    # is a few cells wide, so a chase across it renders as two or three blocks
+    # switching on and off. "Their up/down motion is bad now, it's just split
+    # into three sections and they just flash on and off." A vertical strip has
+    # to keep Per Model Single Line, where the chase runs the length of the
+    # strand -- which is physically up and down. So these carry the new speeds,
+    # fades and FX on the buffer that works.
+    "strand_drift":   ("SingleStrand",
+                       {**_chase("Bounce from Left", span=False,
+                                 rotations="0.4"), **PMSL}),
+    "strand_spark":   ("SingleStrand",
+                       {**_chase("Bounce from Left", span=False,
+                                 fade="None", fx="Fireworks 1D"), **PMSL}),
+    "strand_mid_out": ("SingleStrand",
+                       {**_chase("From Middle", span=False), **PMSL}),
+    "strand_mid_in":  ("SingleStrand",
+                       {**_chase("To Middle", span=False), **PMSL}),
     # --- linear-prop waves (icicles, verticals, C9s) ---
     # --- dramatic reveals ---
     # NOTE: no forced buffer style here -- see group_extra() below. "Per
@@ -2548,9 +2567,10 @@ def line_motion_for(target: dict, seed: str = "") -> tuple[str, str]:
         return _r.choice([
             ("strand_up", "strand_down"),
             ("strand_up", "strand_down"),
-            ("chase_bounce_pp", "chase_bounce_pp"),
-            ("chase_bounce_drift", "chase_bounce_drift"),
-            ("chase_spark", "chase_spark"),
+            ("strand_bounce", "strand_bounce"),
+            ("strand_drift", "strand_drift"),
+            ("strand_spark", "strand_spark"),
+            ("strand_mid_out", "strand_mid_in"),
         ])
     wide = target.get("spread_x", 0) >= 40 or "c9" in name or "gutter" in name
     _r = random.Random(f"{target['name']}|{seed}")
@@ -7057,7 +7077,23 @@ def main():
         hold = max(160, int(span / n * 2.2))
         for k, t in enumerate(seq):
             s = start_ms + int(span * k / (n - 1))
-            add(target_name(t, k), L_SIG, key, s, s + hold, palette)
+            _tn = target_name(t, k)
+            # A PROP WITH GEOMETRY BURSTS AS THE WAVE REACHES IT, rather than
+            # simply lighting. This pass is 37% of every flat `On` on the
+            # flakes and spinners, and the sweep is the same gesture either
+            # way -- one prop after another down the facade -- but a flake
+            # that opens outward as the wave arrives shows the flake, where a
+            # flat fill just proves it is switched on. Krists's own sequences
+            # put Shockwave on those props 45-64% of the time against On at
+            # 10-17%; this generator was the other way round.
+            _k = key
+            if key in ("on_swell", "on_pop", "on_hit") and any(
+                    h in _tn.lower() for h in ("flake", "snowflake", "spinner",
+                                               "rosa", "grand illusion",
+                                               "showstopper", "sphere")):
+                _k = random.Random(f"sweep|{_tn}").choice(
+                    ["shockwave", "ripple_hex_out", "shockwave", key])
+            add(_tn, L_SIG, _k, s, s + hold, palette)
 
     # --- 2a. Fast upward synth zips -> quick sweep up the whole display ---
     fast = sorted(cues.get("fast_risers", []), key=lambda r: -r["rise_ratio"])
