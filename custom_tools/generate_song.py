@@ -8679,14 +8679,26 @@ def main():
                 # hit -- the moment measured 66.6 down to 34.9. Letting it run
                 # on and decay puts the fade where the ear expects it: the hit
                 # lands at full, then the house falls away.
-                eff.end_time_ms = _cut_from + 1600
+                # AN IMMEDIATE CUT, not a slow decay. "It's supposed to be a
+                # dramatic moment where everything cuts out immediately except
+                # for the outlines" -- and previously everything ran on for
+                # 1.6s with a 1.5s fade, which reads as the house sagging
+                # rather than stopping.
+                #
+                # The old long tail existed for a real reason: a fade lives
+                # INSIDE an effect's span, so ending at the cut and adding a
+                # fade-out dimmed the approach and cost the hit itself (66.6
+                # down to 34.9 when that was last tried). The fix is to end at
+                # the cut with a fade SHORT enough that the dimming happens
+                # after the hit lands -- 250ms, not 1.5s.
+                eff.end_time_ms = _cut_from + 250
                 # Marked so nothing lengthens it again. The shader-dwell
                 # minimum (4s) ran after this and stretched the whole-house
                 # bed from the 2.87s this leaves back out to a full 4s,
                 # relighting the entire facade 1.1s into the very dropout that
                 # had just cleared it -- which is why the last drum hit read as
                 # lackluster: the house never actually fell away.
-                eff.settings = {**eff.settings, "T_TEXTCTRL_Fadeout": "1.5",
+                eff.settings = {**eff.settings, "T_TEXTCTRL_Fadeout": "0.25",
                                 "X_TrimmedAtDropout": "1"}
                 _kept.append(eff)
                 continue
@@ -9853,6 +9865,115 @@ def main():
                   f"given a new look across every big canvas")
         return effects
 
+    def _g_no_new_look_during_buildup(effects):
+        """The drop owns the change; the bars before it do not.
+
+        "At 2:43 in Last Goodbye there's a big exciting and fast moving shader
+        that starts even though the song is still building up to the drop
+        which doesn't happen until about 2:47."
+
+        A detected section boundary can legitimately fall inside a build-up --
+        that IS where the build starts -- but giving it a new shader spends the
+        moment early and leaves the drop with nothing to reveal. Measured:
+        the section at 163.17 put an eight-second Spacels on every canvas 3.3s
+        before the drop at 166.46.
+
+        Any shader starting in the run-up is dropped and the previous one is
+        held through to the drop, so the look changes once, on the hit.
+        """
+        if not SNAPPED_DROPS:
+            return effects
+        _lead = 5.0
+        _big = {t["name"] for t in cast
+                if t.get("cat") == "matrix" or t["name"] in CONE_SHAPED
+                or "matri" in t["name"].lower() or t["name"] == "Garage Roof"}
+        _by_prop: dict[str, list] = defaultdict(list)
+        for _e in effects:
+            if _e.effect_name == "Shader" and _e.model_name in _big:
+                _by_prop[_e.model_name].append(_e)
+        _kill: set[int] = set()
+        for _row in _by_prop.values():
+            _row.sort(key=lambda e: e.start_time_ms)
+            for _i, _e in enumerate(_row):
+                _t = _e.start_time_ms / 1000.0
+                _d = next((d for d in sorted(SNAPPED_DROPS)
+                           if _t < d - 0.3 and _t >= d - _lead), None)
+                if _d is None:
+                    continue
+                # MOVED to the drop, not deleted. Deleting it left the canvas
+                # with nothing of its own from the drop until the next change
+                # -- a four-second hole at exactly the moment that should be
+                # the biggest. Moving it makes the same shader arrive on the
+                # hit instead of before it, which is what the change was for.
+                _dms = int(_d * 1000)
+                if _e.end_time_ms - _dms >= 1500:
+                    _e.start_time_ms = _dms
+                else:
+                    _kill.add(id(_e))
+                # Hold whatever was showing before it through to the drop.
+                for _p in reversed(_row[:_i]):
+                    if id(_p) not in _kill and _p.start_time_ms < _dms:
+                        _p.end_time_ms = max(_p.end_time_ms, _dms)
+                        break
+        if _kill or True:
+            effects = drop_effects(effects, _kill,
+                                   "new look during a drop's run-up") \
+                if _kill else effects
+            print(f"Build-up hold: {len(_kill)} shader changes removed and "
+                  f"the rest moved onto the drop, so the look changes on the "
+                  f"hit rather than during the climb")
+        return effects
+
+    def _g_mark_every_drop(effects):
+        """Every drop changes the look, on the drop.
+
+        The section marker guarantees this for boundaries; drops had no
+        equivalent, and an audit across the library found most songs with
+        drops that no shader change landed on -- Cruise 2 of 5, Gooey 2 of 5,
+        World Is Mine 2 of 4. "Go through the timing of the shader changes and
+        section changes everywhere, make sure we're aligned."
+
+        Runs after the build-up hold, so a change that was moved onto the drop
+        already counts and is not doubled.
+        """
+        _canv = [t for t in cast
+                 if not t.get("synthetic") and t["name"] != "ALL Display"
+                 and not _is_flood(t)
+                 and (t.get("cat") == "matrix" or t["name"] in CONE_SHAPED
+                      or "matri" in t["name"].lower()
+                      or t["name"] == "Garage Roof")]
+        if not _canv or not SHADER_KEYS or not SNAPPED_DROPS:
+            return effects
+        _names = {t["name"] for t in _canv}
+        _sh = sorted((e.start_time_ms / 1000.0, e.model_name) for e in effects
+                     if e.effect_name == "Shader" and e.model_name in _names)
+        _marked = 0
+        for _d in sorted(set(SNAPPED_DROPS)):
+            if _d < 4 or _d > _dur_s - 4 or _after_dropout(int(_d * 1000)):
+                continue
+            if any(abs(_t - _d) <= 0.30 for _t, _ in _sh):
+                continue
+            if any(_d >= _wa and _d <= _wb for _wa, _wb in blackout_windows):
+                continue
+            _si = next((i for i, sec in enumerate(analysis.sections)
+                        if sec.start_time <= _d < sec.end_time), 0)
+            _sm = section_meta[_si] if _si < len(section_meta) else {}
+            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                or PALETTES["ice"]
+            _key = random.Random(f"dropmark|{SONG_NAME}|{_d:.2f}").choice(SHADER_KEYS)
+            # To the next change on that canvas, or eight seconds.
+            for _t2 in _canv:
+                _nxt = min((_t for _t, _m in _sh
+                            if _m == _t2["name"] and _t > _d + 0.5),
+                           default=_d + 8.0)
+                add_target(_t2, L_BASE, _key, int(_d * 1000),
+                           int(min(_nxt, _d + 8.0) * 1000), _pal)
+            _marked += 1
+        if _marked:
+            print(f"Drop marking: {_marked} drops that no shader change landed "
+                  f"on given a new look across every big canvas")
+        return effects
+
     def _g_floods_flat(effects):
         # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
         #
@@ -10154,6 +10275,8 @@ def main():
         ("mark section changes on the big canvases", _g_mark_section_changes),
         ("fill canvases lit flat by the house span", _g_fill_flat_canvases),
         ("bars land on the beat and fade", _g_bars_discipline),
+        ("no new look during a drop's run-up", _g_no_new_look_during_buildup),
+        ("every drop changes the look", _g_mark_every_drop),
         ("tie repeating motion to the beat grid", _g_beat_lock_motion),
         ("floods carry flat light only", _g_floods_flat),
         ("no solid slab on a textured matrix", _g_no_slab),
@@ -10194,6 +10317,15 @@ def main():
         (GEN_DIR / "provenance.json").write_text(json.dumps({
             "total": len(effects),
             "by_line": _prov,
+            # The times the passes actually targeted, so a verification tool
+            # measures against those rather than re-deriving them and
+            # disagreeing. verify_alignment.py was reporting correctly-placed
+            # changes as misses because it compared against the RAW detections
+            # while every pass uses the snapped ones.
+            "snapped_drops": sorted(set(round(float(t), 3)
+                                        for t in SNAPPED_DROPS)),
+            "section_starts": [round(float(sec.start_time), 3)
+                               for sec in analysis.sections],
             "guards": GUARD_LOG,
             "removals": [{**_r, "from_passes": {
                 _pass_label(int(_k), _srclines): _v
