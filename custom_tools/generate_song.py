@@ -9595,6 +9595,65 @@ def main():
                   f"by bar)")
         return effects
 
+    def _g_mark_section_changes(effects):
+        """Every real section change gets a new look on the big canvases.
+
+        "When sections change the look doesn't always change, like from chorus
+        to verse and vice versa... ending the chorus and starting the verse had
+        a distinctly different look right on the beat."
+
+        Measured on Gooey: 10 of 56 boundaries passed with no shader change on
+        any big canvas, no colour move and no level move -- nothing at all.
+        This finds those and gives every canvas the same new shader on the
+        boundary, so the change is a decision the whole facade makes together.
+
+        Only boundaries that separate sections of genuinely different energy
+        qualify; a song has more detected boundaries than it has real turns,
+        and marking all 56 would be a strobe of its own.
+        """
+        _canv = [t for t in cast
+                 if not t.get("synthetic") and t["name"] != "ALL Display"
+                 and not _is_flood(t)
+                 and (t.get("cat") == "matrix" or t["name"] in CONE_SHAPED
+                      or "matri" in t["name"].lower()
+                      or t["name"] == "Garage Roof")]
+        if not _canv or not SHADER_KEYS:
+            return effects
+        _sh = [(e.start_time_ms / 1000.0, e.model_name) for e in effects
+               if e.effect_name == "Shader"]
+        _marked = 0
+        for _i in range(1, len(analysis.sections)):
+            _sec = analysis.sections[_i]
+            _t = _sec.start_time
+            if _t < 4 or _t > _dur_s - 4:
+                continue
+            _prev = analysis.sections[_i - 1]
+            # A real turn: the energy either side actually differs.
+            _e0 = getattr(_prev, "energy_level", 0.0) or 0.0
+            _e1 = getattr(_sec, "energy_level", 0.0) or 0.0
+            if abs(_e1 - _e0) < 0.12:
+                continue
+            if any(abs(_s - _t) <= 0.25 for _s, _ in _sh):
+                continue                      # already marked
+            if any(_t >= _wa and _t <= _wb for _wa, _wb in blackout_windows):
+                continue
+            _sm = section_meta[_i] if _i < len(section_meta) else {}
+            _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
+                or PALETTES["ice"]
+            _key = random.Random(f"secmark|{SONG_NAME}|{_i}").choice(SHADER_KEYS)
+            # Ends at the NEXT boundary, never past it. A 12s marker blanketed
+            # whatever came next, so marking three boundaries in Gooey left two
+            # more unmarked than before -- the fix created the problem it was
+            # fixing, one boundary later.
+            _end = int(min(_sec.end_time, _t + 8.0) * 1000)
+            for _t2 in _canv:
+                add_target(_t2, L_BASE, _key, int(_t * 1000), _end, _pal)
+            _marked += 1
+        if _marked:
+            print(f"Section marking: {_marked} boundaries that changed nothing "
+                  f"given a new look across every big canvas")
+        return effects
+
     def _g_floods_flat(effects):
         # FLOODS CARRY FLAT LIGHT ONLY -- enforced at the end.
         #
@@ -9893,6 +9952,7 @@ def main():
     #   * the overlap resolver must be last of the structural passes, since
     #     every other guard can move or lengthen an effect.
     LATE_GUARDS = [
+        ("mark section changes on the big canvases", _g_mark_section_changes),
         ("fill canvases lit flat by the house span", _g_fill_flat_canvases),
         ("bars land on the beat and fade", _g_bars_discipline),
         ("tie repeating motion to the beat grid", _g_beat_lock_motion),
