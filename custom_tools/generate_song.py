@@ -1077,6 +1077,27 @@ def _span_profile() -> dict:
 SPAN_PROFILE = _span_profile()
 
 
+def small_prop_flicker(key: str) -> float:
+    """How hard this shader swings a SMALL prop's whole brightness, 0-1.
+
+    A shader that is calm on a matrix can strobe an orb: the matrix averages
+    thousands of nodes while a small prop samples a tiny patch, so a fine
+    moving texture swings that prop's entire output. shader_span_test.py has
+    measured this all along and only the house bed acted on it -- so Hex 3D
+    Spiral, which scores 1.000, the worst in the library, was still free to
+    land on the Orbs directly. "In World Is Mine at 4:41 the orbs are strobing
+    really hard."
+    """
+    stem = key[len("shader_"):] if key.startswith("shader_") else key
+    for name, prof in SPAN_PROFILE.items():
+        if re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") == stem:
+            return float(prof.get("small_flicker", 0.0))
+    return 0.0
+
+
+CALM_ON_SMALL = 0.25        # same ceiling the house bed uses
+
+
 def spans_evenly(key: str) -> bool:
     """True if this shader measurably fills the house rather than putting its
     picture in one place.
@@ -3443,6 +3464,23 @@ def main():
         # library now carries 51 shaders that cover the same mottled-texture
         # ground better -- so it goes everywhere rather than being chased from
         # one prop family to the next.
+        # A HIGH-FLICKER SHADER NEEDS A CANVAS WITH REAL EXTENT.
+        # Anything made of small discrete objects -- orbs, stars, mini trees,
+        # flakes, canes -- samples a tiny patch of the shader, so its whole
+        # brightness swings with the texture. Only props that can actually
+        # hold a picture get the busy shaders.
+        if key.startswith("shader_") and small_prop_flicker(key) > CALM_ON_SMALL:
+            _nm2 = target.get("name", "")
+            _big_enough = (target.get("cat") == "matrix"
+                           or _nm2 in CONE_SHAPED
+                           or "matri" in _nm2.lower()
+                           or _nm2 == "Garage Roof")
+            if not _big_enough or target.get("per_model") \
+                    or _nm2 in PER_MODEL_GROUPS:
+                _calm = [k for k in SHADER_KEYS
+                         if small_prop_flicker(k) <= CALM_ON_SMALL]
+                if _calm:
+                    key = random.Random(f"calm|{_nm2}|{key}").choice(_calm)
         if key == "plasma_organic":
             key = SHADER_KEYS[0] if SHADER_KEYS else "chase_mid_out"
         # A FLOOD IS ONE PIXEL. Measured: every flood in this show is 3
@@ -9265,6 +9303,20 @@ def main():
     _probe("before write")
 
 
+    # NOTHING IS PLACED AFTER THE FINAL DROPOUT. That pass clears the house to
+    # leave only the outlines, and any guard that adds effects afterwards
+    # undoes it -- which is what kept happening: "the final dropout at 2:33-2:44
+    # in TVOY is still wrong, the whole house stays really bright after all the
+    # instruments drop out." Measured there: the level fell to 19.7 at 2:35 and
+    # climbed back to 57 for the next five seconds, because the canvas fill and
+    # the section marker both ran later and refilled what it had cleared.
+    _no_add_after = (int(final_dropout * 1000) + 150
+                     if final_dropout is not None else None)
+
+    def _after_dropout(ms: int) -> bool:
+        return _no_add_after is not None and ms >= _no_add_after
+
+
     def _g_fill_flat_canvases(effects):
         # A CANVAS MAY BE DARK. IT MAY NOT BE A FLAT WASH OF ONE COLOUR.
         #
@@ -9447,7 +9499,7 @@ def main():
                 else:
                     _runs.append([_ms, _ms])
             for _a, _b in _runs:
-                if _b - _a < 2000:                 # too brief to be a hole
+                if _b - _a < 2000 or _after_dropout(_a):
                     continue
                 if not _lit_by_span(_a, _b + _step):
                     continue
@@ -9502,14 +9554,31 @@ def main():
             # SPARINGLY: one per prop per bar. A second bars sweep arriving on
             # the same prop before the first has had a bar to read is what
             # makes them feel like flicker rather than a gesture.
+            # "In general we seem to be using the diagonal bars changing
+            # orientation effect way too much, it should just be one of many
+            # effects we use sparingly for variety." One per prop per four
+            # bars rather than per bar.
             _prev = _last_by_prop.get(_e.model_name)
-            if _prev is not None and _e.start_time_ms - _prev < _bar_ms:
+            if _prev is not None and _e.start_time_ms - _prev < 4 * _bar_ms:
                 _dropped += 1
                 continue
             _last_by_prop[_e.model_name] = _e.start_time_ms
-            # Long enough to read: at least one bar, where there is room.
-            if _e.end_time_ms - _e.start_time_ms < _bar_ms:
-                _e.end_time_ms = _e.start_time_ms + _bar_ms
+            # TWO bars, not one, and end on a section boundary when one is
+            # near. "There are diagonal bars changing orientation to the beat
+            # but only for one second and then they go away... it's jarring
+            # when they start and stop so quickly. Let's stay until a
+            # section/bar or fade out." One bar is under two seconds at these
+            # tempos, which is what he is calling one second.
+            if _e.end_time_ms - _e.start_time_ms < 2 * _bar_ms:
+                _want = _e.start_time_ms + 2 * _bar_ms
+                _next_sec = next((int(sec.start_time * 1000)
+                                  for sec in analysis.sections
+                                  if sec.start_time * 1000 > _e.start_time_ms + 800),
+                                 None)
+                if _next_sec is not None and \
+                        abs(_next_sec - _want) < _bar_ms:
+                    _want = _next_sec
+                _e.end_time_ms = _want
                 _lengthened += 1
             # And a decay, so it leaves rather than stops.
             if "T_TEXTCTRL_Fadeout" not in _e.settings:
@@ -9520,7 +9589,7 @@ def main():
             _keep.append(_e)
         if _snapped or _dropped or _lengthened or _faded:
             print(f"Bars discipline: {_snapped} snapped to the beat, "
-                  f"{_lengthened} lengthened to a bar, {_faded} given a fade, "
+                  f"{_lengthened} lengthened to two bars, {_faded} given a fade, "
                   f"{_dropped} dropped as too soon after another on the same prop")
         return _keep
 
@@ -9545,6 +9614,28 @@ def main():
         """
         _beat_s = 60.0 / max(analysis.beats.tempo, 60.0)
         _bar_s = 4 * _beat_s
+
+        _big_names = {t["name"] for t in cast
+                      if t.get("cat") == "matrix" or t["name"] in CONE_SHAPED
+                      or "matri" in t["name"].lower()
+                      or t["name"] == "Garage Roof"}
+
+        def _repeat_unit(model: str) -> float:
+            """Beats per repetition, by what the prop is.
+
+            One crossing per beat is right on a matrix, where the bar travels
+            across a wide surface and the eye follows it. On a small prop --
+            a spoke group, a hook, an orb -- the whole thing lights and dims
+            with each crossing, so a per-beat rate is not movement, it is
+            flashing. Measured: 17-second Bars effects on the Grand Illusion
+            submodel groups were given 35 crossings and read as a hard strobe.
+            "In general we seem to have added a lot of flashing and strobing."
+            """
+            return 1.0 if model.split("/")[0] in _big_names else 4.0
+
+        # An absolute ceiling as well as a musical one. However long an effect
+        # runs, past a dozen repetitions it is a texture, not a gesture.
+        _MAX_REPEATS = 12
         _n = 0
         for _e in effects:
             if _e.effect_name != "Bars":
@@ -9554,11 +9645,10 @@ def main():
                 continue
             _beats = _span / _beat_s
             _bar_i = int((_e.start_time_ms / 1000.0) / _bar_s)
-            _unit = (1.0, 1.0, 2.0, 1.0)[_bar_i % 4]      # beat / beat / half / beat
-            _cycles = max(1.0, round(_beats / _unit))
-            # A cap, not a target: past about one crossing per half-beat the
-            # bar stops reading as travel and starts reading as flicker.
-            _cycles = min(_cycles, max(1.0, round(_beats * 2)))
+            _base = _repeat_unit(_e.model_name)
+            # The alternation stays, but around the prop's own unit.
+            _unit = _base * (1.0, 1.0, 2.0, 1.0)[_bar_i % 4]
+            _cycles = max(1.0, min(round(_beats / _unit), _MAX_REPEATS))
             _new = {**_e.settings, "E_TEXTCTRL_Bars_Cycles": f"{_cycles:.1f}"}
             # DIRECTION AND ORIENTATION CHANGE ON THE BEAT TOO. "The bars can
             # also change direction on the beat, and they can also change
@@ -9572,13 +9662,13 @@ def main():
             if _new.get("B_CHOICE_BufferStyle") == "Per Model Default":
                 _d = _new.get("E_CHOICE_Bars_Direction", "")
                 _pick = random.Random(f"bars|{_e.model_name}|{_bar_i}").random()
-                if _d in ("up", "down") and _pick < 0.5:
+                if _d in ("up", "down") and _pick < 0.25:
                     _new["E_CHOICE_Bars_Direction"] = (
                         "Alternate Up" if _d == "up" else "Alternate Down")
-                elif _d in ("Left", "Right") and _pick < 0.35:
+                elif _d in ("Left", "Right") and _pick < 0.15:
                     # Orientation: open from the middle instead of crossing.
                     _new["E_CHOICE_Bars_Direction"] = (
-                        "expand" if _pick < 0.18 else "H-expand")
+                        "expand" if _pick < 0.08 else "H-expand")
             # SPEED THAT CHANGES ON THE BEAT. Krists puts a VALUE CURVE on
             # Bars_Cycles -- one measured example ramps 30 to 141 crossings
             # across four seconds -- which is how a bar can move fast and then
@@ -9610,7 +9700,7 @@ def main():
             # on the beat too." A buffer rotation turns the bars diagonal;
             # Krists uses Rotate CC 90 for this.
             if _new.get("B_CHOICE_BufferStyle") == "Per Model Default" \
-                    and random.Random(f"tilt|{_e.model_name}|{_bar_i}").random() < 0.25:
+                    and random.Random(f"tilt|{_e.model_name}|{_bar_i}").random() < 0.08:
                 _new["B_CHOICE_BufferTransform"] = "Rotate CC 90"
             _e.settings = _new
             _n += 1
@@ -9629,12 +9719,14 @@ def main():
             _beats = _span / _beat_s
             _bar_i = int((_e.start_time_ms / 1000.0) / _bar_s)
             if _e.effect_name == "Shockwave":
-                _c = max(1, min(int(round(_beats)), 16))
+                _c = max(1, min(int(round(_beats / _repeat_unit(_e.model_name))),
+                                _MAX_REPEATS))
                 _e.settings = {**_e.settings,
                                "E_SLIDER_Shockwave_Cycles": str(_c)}
                 _r2 += 1
             elif _e.effect_name == "Ripple":
-                _c = max(1, min(int(round(_beats / 2)), 12))
+                _c = max(1, min(int(round(_beats / (2 * _repeat_unit(_e.model_name)))),
+                                _MAX_REPEATS))
                 _e.settings = {**_e.settings,
                                "E_TEXTCTRL_Ripple_Cycles": f"{_c}.0"}
                 _r2 += 1
@@ -9688,7 +9780,7 @@ def main():
         for _i in range(1, len(analysis.sections)):
             _sec = analysis.sections[_i]
             _t = _sec.start_time
-            if _t < 4 or _t > _dur_s - 4:
+            if _t < 4 or _t > _dur_s - 4 or _after_dropout(int(_t * 1000)):
                 continue
             _prev = analysis.sections[_i - 1]
             # A real turn: the energy either side actually differs.
