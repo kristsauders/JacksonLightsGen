@@ -247,6 +247,30 @@ def _bars(direction: str, cycles: str = "1", buffer: dict | None = None,
     }
 
 
+# Bars, retired at Krists's request after it turned up "everywhere" and read as
+# stuttering when it changed orientation. Mapped to the nearest non-bar gesture
+# rather than deleted outright, so the passes that reached for a directional
+# sweep still get one.
+_BARS_SUBSTITUTE = {
+    "sweep_right": "chase_lr", "sweep_left": "chase_rl",
+    "sweep_up": "strand_up", "sweep_down": "strand_down",
+    "bars_up_in": "strand_up", "bars_down_in": "strand_down",
+    "bars_alt_up": "chase_bounce_pp", "bars_alt_down": "chase_bounce_pp",
+    "bars_expand": "chase_mid_out", "bars_compress": "chase_mid_in",
+    "bars_hexpand": "chase_mid_out_pp", "bars_hcompress": "chase_mid_in_pp",
+    "bars_three": "shockwave", "bars_two_up": "strand_up",
+    # SPIRALS GOES TOO, and it was the real offender. On a matrix it draws
+    # diagonal bands, and the Saw Tooth rotation curve added last round swept
+    # those bands back and forth -- so what Krists was describing as "diagonal
+    # bars changing orientation", "stuttering when they change orientation"
+    # and "for just one second" was one effect: a 1.44s Spirals on the full
+    # matrix at This Version of You 0:58, with a reversing rotation on top.
+    # He had already asked for "less built-in effects like the spiral and
+    # wave" in an earlier round.
+    "spirals": "chase_mid_out",
+}
+
+
 EFFECTS: dict[str, tuple[str, dict]] = {
     # --- feature motion (span the group as one canvas) ---
     "chase_lr":       ("SingleStrand", _chase("Left-Right")),
@@ -3481,6 +3505,17 @@ def main():
                          if small_prop_flicker(k) <= CALM_ON_SMALL]
                 if _calm:
                     key = random.Random(f"calm|{_nm2}|{key}").choice(_calm)
+        # BARS ARE RETIRED. "Let's just remove all the diagonal bars effects
+        # completely, it's just not working and it's everywhere. Maybe it's not
+        # bars, bars are just what I visually see."
+        #
+        # Every Bars-based key is substituted with the nearest thing that gives
+        # the same directional movement without drawing a bar: a chase travels
+        # the same way, a shockwave opens from the middle the way expand did.
+        # The effect and its whole parameter vocabulary -- alternate
+        # directions, tilt, cycles curves -- goes with it.
+        if key in _BARS_SUBSTITUTE:
+            key = _BARS_SUBSTITUTE[key]
         if key == "plasma_organic":
             key = SHADER_KEYS[0] if SHADER_KEYS else "chase_mid_out"
         # A FLOOD IS ONE PIXEL. Measured: every flood in this show is 3
@@ -9541,7 +9576,18 @@ def main():
         _keep = []
         _last_by_prop: dict[str, int] = {}
         for _e in sorted(effects, key=lambda x: x.start_time_ms):
-            if _e.effect_name != "Bars":
+            # SPANNING CHASES COUNT AS BARS HERE. What Krists calls "the
+            # diagonal bars" is not always the Bars effect: a SingleStrand on
+            # a Per Preview buffer stretches one chase across the whole facade
+            # and renders as broad diagonal stripes sweeping past. Measured at
+            # This Version of You 0:58 -- a 1.44s spanning chase on All Yard
+            # Props, the Arches and the C9s, with no fade-out, which stops
+            # dead. "I don't like that bars for 1 second effect and it's used
+            # way too often." The Bars-only filter never saw it.
+            _spanning_chase = (_e.effect_name == "SingleStrand"
+                               and _e.settings.get("B_CHOICE_BufferStyle")
+                               == "Per Preview")
+            if _e.effect_name != "Bars" and not _spanning_chase:
                 _keep.append(_e)
                 continue
             # On the beat.
@@ -9563,6 +9609,17 @@ def main():
                 _dropped += 1
                 continue
             _last_by_prop[_e.model_name] = _e.start_time_ms
+            # A spanning chase at a drop is MEANT to be a quick gesture, so it
+            # keeps its length and gets a decay instead -- "either lasts longer
+            # or fades out". Only the Bars effect is stretched.
+            if _spanning_chase:
+                if "T_TEXTCTRL_Fadeout" not in _e.settings:
+                    _sp = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+                    _e.settings = {**_e.settings,
+                                   "T_TEXTCTRL_Fadeout": f"{min(1.2, _sp * 0.5):.2f}"}
+                    _faded += 1
+                _keep.append(_e)
+                continue
             # TWO bars, not one, and end on a section boundary when one is
             # near. "There are diagonal bars changing orientation to the beat
             # but only for one second and then they go away... it's jarring
@@ -9729,19 +9786,6 @@ def main():
                                 _MAX_REPEATS))
                 _e.settings = {**_e.settings,
                                "E_TEXTCTRL_Ripple_Cycles": f"{_c}.0"}
-                _r2 += 1
-            elif _e.effect_name == "Spirals":
-                # SPIN THAT REVERSES. A Saw Tooth rotation curve sweeps from
-                # -P1 to +P2 and repeats P3 times across the span, so P3 =
-                # span-in-bars is a direction change every bar. This is the
-                # "things that spin and change directions on the beat"; a
-                # fixed rotation cannot express it.
-                _p3 = max(1, min(int(round(_span / _bar_s)), 8))
-                _e.settings = {**_e.settings,
-                               "E_VALUECURVE_Spirals_Rotation":
-                               "Active=TRUE|Id=ID_VALUECURVE_Spirals_Rotation|"
-                               "Type=Saw Tooth|Min=-300.00|Max=300.00|"
-                               f"P1=-102.00|P2=102.00|P3={_p3}.00|RV=TRUE|"}
                 _r2 += 1
         if _n or _r2:
             print(f"Beat-locked motion: {_n} bars given a crossing rate from "
