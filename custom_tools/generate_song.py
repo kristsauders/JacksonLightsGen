@@ -512,6 +512,29 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     # Pinwheel as a SWEEP rather than a spinning fan -- the arm smears round
     # instead of strobing past, which is why his version survives on a matrix
     # where the plain fan was "too basic".
+    # Spinners with the arm counts and speeds Krists actually uses (arms 3-6,
+    # speed 2/5/7/10 against this generator's single fixed setting), and a
+    # twisted variant. These are the "spinning and wobbling kinds of effects"
+    # for the showstopper, EFL, Rosa Grande and Baby Grand Illusion props.
+    "pinwheel_4":     ("Pinwheel", {"E_SLIDER_Pinwheel_Arms": "4",
+                                    "E_SLIDER_Pinwheel_Speed": "7",
+                                    "E_CHECKBOX_Pinwheel_Rotation": "1",
+                                    "E_SLIDER_Pinwheel_Thickness": "20",
+                                    "E_CHOICE_Pinwheel_Style": "New Render Method",
+                                    "B_CHOICE_BufferStyle": "Per Model Default"}),
+    "pinwheel_6_slow": ("Pinwheel", {"E_SLIDER_Pinwheel_Arms": "6",
+                                     "E_SLIDER_Pinwheel_Speed": "2",
+                                     "E_CHECKBOX_Pinwheel_Rotation": "1",
+                                     "E_SLIDER_Pinwheel_Thickness": "30",
+                                     "E_CHOICE_Pinwheel_Style": "New Render Method",
+                                     "B_CHOICE_BufferStyle": "Per Model Default"}),
+    "pinwheel_twist": ("Pinwheel", {"E_SLIDER_Pinwheel_Arms": "3",
+                                    "E_SLIDER_Pinwheel_Speed": "10",
+                                    "E_SLIDER_Pinwheel_Twist": "40",
+                                    "E_CHECKBOX_Pinwheel_Rotation": "1",
+                                    "E_SLIDER_Pinwheel_Thickness": "10",
+                                    "E_CHOICE_Pinwheel_Style": "New Render Method",
+                                    "B_CHOICE_BufferStyle": "Per Model Default"}),
     "pinwheel_sweep": ("Pinwheel", {"E_CHOICE_Pinwheel_3D": "Sweep",
                                     "E_CHOICE_Pinwheel_Style": "New Render Method",
                                     "E_CHECKBOX_Pinwheel_Rotation": "1",
@@ -2848,6 +2871,7 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
             "ripple_hex_in", "ripple_hex_out", "ripple_rays",
             "chase_bounce_pp", "chase_spark",
             "bars_alt_up", "bars_alt_down", "bars_expand", "bars_hexpand",
+            "pinwheel_4", "pinwheel_twist", "spirals",
         ])
     if n >= 4:
         return rng.choice(["sweep_right", "sweep_left"] if wide else ["sweep_up", "sweep_down"])
@@ -6171,7 +6195,8 @@ def main():
                               "pinwheel", "on_pop", "on_pop",
                               # Bars that reverse on the beat, and that open
                               # from the middle rather than sweeping past.
-                              "bars_alt_up", "bars_expand", "bars_three"])
+                              "bars_alt_up", "bars_expand", "bars_three",
+                              "pinwheel_4", "pinwheel_6_slow", "pinwheel_twist"])
         # THE DEFAULT IS MOVEMENT, NOT A FLASH.
         #
         # This fallback produced 81% of every `On` in the song, and what it
@@ -9589,10 +9614,48 @@ def main():
                 _new["B_CHOICE_BufferTransform"] = "Rotate CC 90"
             _e.settings = _new
             _n += 1
-        if _n:
-            print(f"Beat-locked motion: {_n} bars effects given a crossing rate "
-                  f"derived from their own span (beat / half-note, alternating "
-                  f"by bar)")
+        # THE SAME ARITHMETIC FOR EVERYTHING THAT REPEATS.
+        #
+        # Shockwave, Ripple and Spirals all expose a repeat count, and Krists
+        # sets it on nearly every one he places: Shockwave_Cycles 11,780
+        # times, Ripple_Cycles 2,815. A ring that pulses once per beat is
+        # cycles = span-in-beats, exactly as for Bars. Ours were left at the
+        # default, so they pulsed once per effect however long it ran.
+        _r2 = 0
+        for _e in effects:
+            _span = (_e.end_time_ms - _e.start_time_ms) / 1000.0
+            if _span < 2 * _beat_s:
+                continue
+            _beats = _span / _beat_s
+            _bar_i = int((_e.start_time_ms / 1000.0) / _bar_s)
+            if _e.effect_name == "Shockwave":
+                _c = max(1, min(int(round(_beats)), 16))
+                _e.settings = {**_e.settings,
+                               "E_SLIDER_Shockwave_Cycles": str(_c)}
+                _r2 += 1
+            elif _e.effect_name == "Ripple":
+                _c = max(1, min(int(round(_beats / 2)), 12))
+                _e.settings = {**_e.settings,
+                               "E_TEXTCTRL_Ripple_Cycles": f"{_c}.0"}
+                _r2 += 1
+            elif _e.effect_name == "Spirals":
+                # SPIN THAT REVERSES. A Saw Tooth rotation curve sweeps from
+                # -P1 to +P2 and repeats P3 times across the span, so P3 =
+                # span-in-bars is a direction change every bar. This is the
+                # "things that spin and change directions on the beat"; a
+                # fixed rotation cannot express it.
+                _p3 = max(1, min(int(round(_span / _bar_s)), 8))
+                _e.settings = {**_e.settings,
+                               "E_VALUECURVE_Spirals_Rotation":
+                               "Active=TRUE|Id=ID_VALUECURVE_Spirals_Rotation|"
+                               "Type=Saw Tooth|Min=-300.00|Max=300.00|"
+                               f"P1=-102.00|P2=102.00|P3={_p3}.00|RV=TRUE|"}
+                _r2 += 1
+        if _n or _r2:
+            print(f"Beat-locked motion: {_n} bars given a crossing rate from "
+                  f"their own span (beat / half-note, alternating by bar); "
+                  f"{_r2} shockwaves, ripples and spirals given a repeat rate "
+                  f"the same way")
         return effects
 
     def _g_mark_section_changes(effects):
