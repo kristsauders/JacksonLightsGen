@@ -3186,6 +3186,16 @@ def main():
         _env = os.environ.get("PROBE")
         if not _env:
             return
+        if _env.startswith("mt:"):
+            _rows = [(round(e.start_time_ms / 1000.0, 2),
+                      round(e.end_time_ms / 1000.0, 2))
+                     for e in effects
+                     if e.model_name == "Mega Tree" and e.effect_name == "Shader"
+                     and float(_env.split(":")[1] or 10)
+                     < e.start_time_ms / 1000.0
+                     < float(_env.split(":")[2] or 20)]
+            print(f"    MT {_lbl:32s} {sorted(_rows)}")
+            return
         for _t in [float(x) for x in _env.split(",") if x.strip()
                    and x.strip()[0].isdigit()]:
             _n = sum(1 for _e in effects
@@ -3651,6 +3661,57 @@ def main():
     stem_dir = SHOW_PATH / "stems" / SONG_NAME
     drum_fills = detect_drum_fills(stem_dir, beats, beat_ms)
     voices = detect_instrument_voices(stem_dir, beats, beat_ms, drum_fills)
+
+    # SECTION BOUNDARIES MOVE TO THE HIT THE BAND LANDS ON -- once, here, so
+    # every pass downstream inherits the corrected time rather than each one
+    # snapping its own way.
+    #
+    # The section detector reports where its analysis window crosses, which can
+    # sit BETWEEN two beats; rounding to the nearest is then a coin flip.
+    # Measured on Gooey: the section at 15.46s sits exactly between beats at
+    # 15.16 and 15.86, rounds DOWN, and the kick and bass land at 15.85. "The
+    # second big drum hit in the beginning around 0:16 is off -- the shaders
+    # change before the kick/bass hits." A whole beat early, and early reads
+    # far worse than late, because the change pre-empts the thing it marks.
+    #
+    # Correcting the section itself also answers the other half: "the section
+    # changes and shaders changing all together at the same time as each
+    # other." They can only agree if they are all reading the same number.
+    if beats:
+        _bt_arr = np.asarray(beats, dtype=float)
+        _beat_s = beat_ms / 1000.0
+        _moved = 0
+        for _sec in analysis.sections:
+            _lo, _hi = _sec.start_time - 0.12, _sec.start_time + 1.15 * _beat_s
+            _cands = [float(t) for _vn in ("kick", "snare", "bass")
+                      if (_v := voices.get(_vn)) is not None
+                      for t in _v.onsets if _lo <= t <= _hi]
+            # ONLY LOOK AHEAD IF NOTHING IS ALREADY HERE. Taking the first
+            # onset in the window unconditionally pushes a boundary that was
+            # already right onto the NEXT hit: Gooey's 3:01 drop moved from
+            # 181.37 to 182.07 and the canvases split across two times. If a
+            # hit sits at the boundary, the boundary is already correct.
+            _here = [t for t in _cands if abs(t - _sec.start_time) <= 0.15]
+            # ...and never move further than three-quarters of a beat. The
+            # correction exists to fix a boundary that rounded to the WRONG
+            # SIDE of a beat, which is at most half a beat of error. A larger
+            # move means the nearest hit is a different musical event, and
+            # taking it pushes the boundary onto the next one: Gooey's 3:01
+            # moved a full beat to 182.07 and split the canvases across two
+            # times, where 181.37 was right.
+            _cap = 0.75 * _beat_s
+            _near = [t for t in _cands if abs(t - _sec.start_time) <= _cap]
+            _target = (_sec.start_time if _here or not _near else min(_near))
+            _snap = float(_bt_arr[int(np.argmin(np.abs(_bt_arr - _target)))])
+            if abs(_snap - _sec.start_time) > 0.02:
+                _sec.start_time = _snap
+                _moved += 1
+        # Keep the section list consistent: each end is the next one's start.
+        for _i in range(len(analysis.sections) - 1):
+            analysis.sections[_i].end_time = analysis.sections[_i + 1].start_time
+        if _moved:
+            print(f"Section boundaries: {_moved} moved onto the drum/bass hit "
+                  f"they mark (of {len(analysis.sections)})")
 
     # INSTRUMENT ENTRANCES ARE STRUCTURAL MOMENTS.
     #
@@ -7791,7 +7852,31 @@ def main():
     # window is dropped.
     if cohort_marks:
         import bisect
-        grid = sorted(cohort_marks)
+        # THE GRID ITSELF LANDS ON HITS. These marks come from cycle and hold
+        # boundaries computed by several passes, and the lock then pulls every
+        # big canvas onto the nearest one -- so a mark sitting a beat early
+        # drags the whole facade there with it. Measured on Gooey: the intro's
+        # second cycle is placed at 15.75, the grid held 15.16, and every big
+        # canvas got pulled to 15.16 while the kick and bass land at 15.85.
+        # "The shaders change before the kick/bass hits."
+        #
+        # Snapping the marks first means the cohort still moves as one -- which
+        # is the whole point of it -- but onto the beat the music is on.
+        _bt_g = np.asarray(beats, dtype=float)
+        _beat_g = beat_ms / 1000.0
+
+        def _mark_on_hit(ms: int) -> int:
+            _x = ms / 1000.0
+            _lo, _hi = _x - 0.12, _x + 1.15 * _beat_g
+            _c = [float(t) for _vn in ("kick", "snare", "bass")
+                  if (_v := voices.get(_vn)) is not None
+                  for t in _v.onsets if _lo <= t <= _hi]
+            _tgt = min(_c) if _c else _x
+            if _bt_g.size:
+                _tgt = float(_bt_g[int(np.argmin(np.abs(_bt_g - _tgt)))])
+            return int(round(_tgt * 1000))
+
+        grid = sorted({_mark_on_hit(m) for m in cohort_marks})
 
         def _snap(v: int) -> int:
             i = bisect.bisect_left(grid, v)
@@ -8926,6 +9011,36 @@ def main():
             return x
         return float(_bt[int(np.argmin(np.abs(_bt - x)))])
 
+    def _on_hit_beat(x: float) -> float:
+        """A section boundary belongs on the hit the band lands on.
+
+        The section detector reports where its analysis window crosses, which
+        can sit BETWEEN two beats -- and `nearest beat` then rounds to
+        whichever is closer, which is a coin flip. Measured on Gooey: the
+        section at 15.46s sits exactly between beats at 15.16 and 15.86,
+        rounds DOWN to 15.16, and the kick and bass land at 15.85. "The second
+        big drum hit in the beginning around 0:16 is off -- the shaders change
+        before the kick/bass hits."
+
+        A whole beat early, and early reads far worse than late: the change
+        pre-empts the thing it exists to mark. So if a drum or bass onset lies
+        within about a beat after the boundary, that onset IS the boundary.
+        """
+        _beat = 60.0 / max(analysis.beats.tempo, 60.0)
+        _lo, _hi = x - 0.12, x + 1.15 * _beat
+        _cands: list[float] = []
+        for _vn in ("kick", "snare", "bass"):
+            _v = voices.get(_vn)
+            if _v is not None:
+                _cands += [float(t) for t in _v.onsets if _lo <= t <= _hi]
+        # Already on a hit -> already right. Only reach forward when the
+        # boundary has nothing under it; otherwise this pushes a correct time
+        # onto the next hit instead.
+        if any(abs(t - x) <= 0.15 for t in _cands):
+            return _on_beat(x)
+        return _on_beat(min(_cands)) if _cands else _on_beat(x)
+
+
     # DROPS OUTRANK EVERYTHING. A drop is the moment the whole look is
     # supposed to change, and a shader arriving even a beat late reads as a
     # mistake in a way that a slightly-off section change does not. Measured on
@@ -8945,6 +9060,17 @@ def main():
     # 74.37 and only the snapped 77.10 is the actual hit. Offering both lets
     # each shader change take whichever is nearer, instead of one song's
     # correct answer overriding the other's.
+    # Hit-corrected, like the section anchors. A drop anchor sitting a beat
+    # before the band lands is worse than no anchor at all, because the pull is
+    # 3.2s wide and drags the change with it: Gooey's intro cycle was placed at
+    # 15.75, correctly moved to the kick at 15.86 by the cohort lock, and then
+    # yanked back to 15.16 by an anchor derived from a minor drop detected in
+    # the run-up. Every anchor now names the same instant the music does.
+    # Drops keep `_on_beat`: they have ALREADY been through _snap_drop, which
+    # does its own "first strong hit after the detection" search. Running the
+    # section-level correction over them as well double-corrects and pushes a
+    # correct drop onto the NEXT hit -- Gooey's 3:01 moved from 181.37 to
+    # 182.07 and split the canvases across two times.
     _drop_anchors = sorted({_on_beat(_t) for _t in SNAPPED_DROPS if _t}
                            | {_on_beat(_t) for _t in MINOR_DROPS if _t}
                            | {_on_beat(_t)
@@ -8972,7 +9098,7 @@ def main():
 
     _anchors = sorted(
         [t for _ap in ambient_passages for t in _ap.get("sparse", [])]
-        + [_on_beat(sec.start_time) for sec in analysis.sections])
+        + [_on_hit_beat(sec.start_time) for sec in analysis.sections])
     _snapped = 0
     if _anchors:
         import bisect as _bisect
@@ -8988,6 +9114,31 @@ def main():
                     _e.start_time_ms = _ms
                     _snapped += 1
                     continue
+            # The hit guard runs AFTER the drop pull, not before it. A drop
+            # outranks everything -- that is the whole point of the wider
+            # pull -- and guarding first stopped Gooey's 3:01 change from
+            # reaching the drop at all, because the placement it started
+            # from happened to sit on an unrelated onset.
+            # ALREADY ON A HIT? THEN LEAVE IT. Every anchor here is an
+            # approximation of where the music turns, and snapping a start
+            # that already sits on a drum or bass onset can only move it off
+            # one. Measured on Gooey: the intro's second cycle was correctly
+            # placed on the kick at 15.86, and a chord anchor at 15.35 --
+            # itself rounded to the beat at 15.16 -- dragged it back a whole
+            # beat, so the shaders changed before the kick they were marking.
+            _on_hit_already = False
+            for _vn in ("kick", "snare", "bass"):
+                _v = voices.get(_vn)
+                # 0.15s, not 0.06. The onset detectors and the beat grid do
+                # not agree to the millisecond -- on Gooey the bass lands at
+                # 15.93 while the beat marking it is 15.86, 70ms apart -- and a
+                # tolerance tighter than that disagreement makes the guard
+                # useless exactly where it matters.
+                if _v is not None and any(abs(_o - _t) <= 0.15 for _o in _v.onsets):
+                    _on_hit_already = True
+                    break
+            if _on_hit_already:
+                continue
             _j = _bisect.bisect_left(_anchors, _t)
             _best = min((_anchors[k] for k in (_j - 1, _j)
                          if 0 <= k < len(_anchors)),
@@ -9080,6 +9231,7 @@ def main():
                 _i += 1
     if _drop:
         effects = drop_effects(effects, _drop, "shader dwell: stacked or too-short shader")
+    _probe("shader dwell (snap+dwell)")
     print(f"Shader dwell: {_snapped} starts snapped to a chord or section, "
           f"{_stacked} stacked shaders removed, {_merged} short "
           f"spans lengthened or merged, {_closed} gaps closed "
@@ -9572,7 +9724,7 @@ def main():
         # 183.10 -- 1.7s of both at once.
         _cut_late = 0
         _anchor_set = sorted(set(_drop_anchors)
-                             | {_on_beat(sec.start_time) for sec in analysis.sections})
+                             | {_on_hit_beat(sec.start_time) for sec in analysis.sections})
         _prop_sh: dict[str, list] = {}
         for _e in effects:
             if _e.effect_name == "Shader":
@@ -9754,6 +9906,7 @@ def main():
     for _gname, _gfn in LATE_GUARDS:
         _before = len(effects)
         effects = _gfn(effects)
+        _probe(_gname)
         GUARD_LOG.append({"guard": _gname, "before": _before,
                           "after": len(effects)})
 
