@@ -582,6 +582,48 @@ EFFECTS: dict[str, tuple[str, dict]] = {
                                      "E_SLIDER_Curtain_Swag": "0",
                                      "E_TEXTCTRL_Curtain_Speed": "1.0",
                                      "B_CHOICE_BufferStyle": "Per Preview"}),
+    # --- hanging spheres ------------------------------------------------
+    # Seven spheres, 240 nodes each as 8 strands of 30 -- enough resolution for
+    # travel ALONG the sphere, not just around it. "You can do up and down
+    # movements since there are enough lights, in addition to the rotation
+    # you're doing now. You can also do sparkling... you could use different
+    # colors for alternating strands or something."
+    #
+    # Fill is the up/down: it floods the buffer from one edge to the other, so
+    # on a sphere it reads as the light rising or draining. Krists uses it 143
+    # times in his own sequences and this generator had no Fill at all.
+    # Fill_Position needs a VALUE CURVE or the fill just lands and sits there:
+    # measured at a constant 158 across its whole span, which is a lit prop,
+    # not a rising one. The curve is what makes the level travel.
+    "fill_up":        ("Fill", {"E_CHOICE_Fill_Direction": "Up",
+                                "E_TEXTCTRL_Fill_Position": "0",
+                                "E_VALUECURVE_Fill_Position":
+                                "Active=TRUE|Id=ID_VALUECURVE_Fill_Position|"
+                                "Type=Ramp|Min=0.00|Max=100.00|P1=0.00|"
+                                "P2=100.00|RV=TRUE|",
+                                "E_CHECKBOX_Fill_Wrap": "0",
+                                "B_CHOICE_BufferStyle": "Per Model Default"}),
+    "fill_down":      ("Fill", {"E_CHOICE_Fill_Direction": "Down",
+                                "E_TEXTCTRL_Fill_Position": "0",
+                                "E_VALUECURVE_Fill_Position":
+                                "Active=TRUE|Id=ID_VALUECURVE_Fill_Position|"
+                                "Type=Ramp|Min=0.00|Max=100.00|P1=100.00|"
+                                "P2=0.00|RV=TRUE|",
+                                "E_CHECKBOX_Fill_Wrap": "0",
+                                "B_CHOICE_BufferStyle": "Per Model Default"}),
+    # ALTERNATING STRANDS. Per Model Horizontal Per Strand gives each strand
+    # its own row of the buffer, so a two-colour palette lands different
+    # colours on neighbouring strands instead of blending across the sphere.
+    # Another buffer style measured straight out of his sequences.
+    "strand_stripes": ("Color Wash",
+                       {"E_CHECKBOX_ColorWash_VFade": "1",
+                        "E_CHECKBOX_ColorWash_CycleCount": "1",
+                        "B_CHOICE_BufferStyle": "Per Model Horizontal Per Strand"}),
+    "sphere_sparkle": ("Twinkle", {"E_SLIDER_Twinkle_Count": "40",
+                                   "E_SLIDER_Twinkle_Steps": "12",
+                                   "E_CHECKBOX_Twinkle_Strobe": "0",
+                                   "E_CHECKBOX_Twinkle_ReRandom": "1",
+                                   "B_CHOICE_BufferStyle": "Per Model Default"}),
     # --- bursts ---
     "on_hit":         ("On", {"T_TEXTCTRL_Fadein": "0.02", "T_TEXTCTRL_Fadeout": "0.12"}),
     "on_pop":         ("On", {"T_TEXTCTRL_Fadein": "0.01", "T_TEXTCTRL_Fadeout": "0.22"}),
@@ -2897,6 +2939,10 @@ def feature_effect_for(target: dict, rng: random.Random, escalation: int,
         return rng.choice(["chase_lr", "chase_rl", "wash",
                            "ripple_hex_in", "ripple_hex_out", "pinwheel_sweep",
                            "bars_expand", "bars_hexpand", "bars_alt_up"])
+    if "hanging sphere" in target["name"].lower():
+        return rng.choice(["fill_up", "fill_down", "sphere_sparkle",
+                           "strand_stripes", "ripple_hex_out", "meteors_down",
+                           "pinwheel_4", "chase_bounce_drift"])
     if cat == "tree":
         return rng.choice(["chase_mid_out", "meteors_down", "spirals",
                            "chase_bounce_drift"])
@@ -6283,6 +6329,14 @@ def main():
         # signature through the song instead of flickering between gestures.
         _nm = target["name"].lower()
         _r = random.Random(f"beat-hit|{target['name']}")
+        if "hanging sphere" in _nm:
+            # A sphere is 8 strands of 30 -- it can travel along itself, not
+            # just flash. Up/down fills, sparkle, a ring from the middle, and
+            # the alternating-strand stripes, so the seven read as objects
+            # doing something rather than seven lamps switching.
+            return _r.choice(["fill_up", "fill_down", "sphere_sparkle",
+                              "shockwave", "strand_stripes", "ripple_hex_in",
+                              "chase_mid_out", "on_pop"])
         if any(h in _nm for h in ("mini tree", "tree")):
             # Cone-shaped: travel along it, or shut it like a curtain.
             return _r.choice(["chase_mid_out", "chase_bounce_drift",
@@ -8309,19 +8363,49 @@ def main():
     # -> rightmost. Same note always lights the same prop, so a repeated
     # melodic phrase draws the same shape on the house every time.
     n_melody = 0
+    _mel_played: list[str] = []
     if melody_notes:
         mel_candidates = [
             t for t in cast
+            # The spheres and orbs may play the melody even if they already
+            # carry an instrument voice. The rule exists so one prop is not
+            # asked to represent two things at once, but these two are the
+            # only families with enough discrete members to make pitch legible
+            # -- "the orbs are also enough to do melodies" -- and excluding
+            # them left the melody with nowhere good to go.
             if t["n"] >= 4 and not t.get("symmetric")
-            and t["name"] not in prop_voice and t["cat"] != "arch"
+            and (t["name"] not in prop_voice
+                 or t["name"] in ("Hanging Spheres", "Orbs"))
+            and t["cat"] != "arch"
             and "/" not in t["name"]
             and not any(h in t["name"].lower() for h in OUTLINE_NAME_HINTS)
         ]
         if mel_candidates:
-            mel_target = max(mel_candidates,
-                             key=lambda t: (t["name"] in MUST_HAVE_GROUPS, t["n"]))
-            members = sorted(mel_target["members"],
-                             key=lambda m: positions.get(m, {}).get("x", 0))
+            # SEVEN SPHERES IS AN OCTAVE. "There are seven of them which is
+            # essentially a full octave, you could use them to play a slow
+            # melody or bass line as long as it's not too chaotic." A scale
+            # degree maps straight onto one sphere, so a repeated phrase draws
+            # the same shape in the air every time -- which is the whole point
+            # of pitch-mapping and is much clearer on seven discrete objects
+            # than on a row of mixed props.
+            # ...and the Orbs carry one just as well: "the orbs are also
+            # enough to do melodies, you can use both together or one at a
+            # time or whatever too for variety." So the phrase, not the song,
+            # picks who plays it -- spheres, orbs, or both at once -- which
+            # keeps a long melodic song from becoming one prop's job.
+            _mel_pref = [t for t in mel_candidates
+                         if t["name"] in ("Hanging Spheres", "Orbs")]
+            _mel_fallback = max(
+                mel_candidates,
+                key=lambda t: (t["name"] in MUST_HAVE_GROUPS, t["n"]))
+            _mel_pool = _mel_pref or [_mel_fallback]
+
+            def _members_of(t):
+                return sorted(t["members"],
+                              key=lambda m: positions.get(m, {}).get("x", 0))
+
+            mel_target = _mel_pool[0]
+            members = _members_of(mel_target)
             # Drop notes inside an ambient passage. The melody follows the
             # strings or vocal, a DIFFERENT rhythm from the piano chords such a
             # passage is built around -- "there is something else happening too
@@ -8332,24 +8416,54 @@ def main():
             if not melody_notes:
                 mel_candidates = []
             n_deg = (melody_notes[0].get("n_degrees", 1) or 1) if melody_notes else 1
-            for note in melody_notes:
-                # Map the note's pitch rank onto a member index. More notes
-                # than props is normal -- several adjacent semitones share a
-                # prop, which still preserves "melody goes up = light moves
-                # right" as the readable gesture.
-                idx = int(note["degree"] * len(members) / max(1, n_deg))
-                idx = max(0, min(len(members) - 1, idx))
+            # Phrases: a gap of more than two seconds starts a new one, and
+            # each phrase is assigned its player. Alternating WITHIN a phrase
+            # would scatter one musical line across the house, which is the
+            # "chaotic and random" he warned against.
+            _phrase_of: dict[int, int] = {}
+            _ph = 0
+            _prev_end = None
+            for _i, _n in enumerate(melody_notes):
+                if _prev_end is not None and _n["start"] - _prev_end > 2.0:
+                    _ph += 1
+                _phrase_of[_i] = _ph
+                _prev_end = _n.get("end", _n["start"])
+            _n_phrases = _ph + 1
+
+            def _players(ph: int) -> list[dict]:
+                if len(_mel_pool) < 2:
+                    return _mel_pool
+                _r = random.Random(f"{SONG_NAME}|melody-player|{ph}").random()
+                if _r < 0.25:
+                    return _mel_pool            # both together
+                return [_mel_pool[ph % len(_mel_pool)]]
+
+            _played: set[str] = set()
+            for _i, note in enumerate(melody_notes):
                 s_ms = int(note["start"] * 1000)
                 e_ms = max(s_ms + 160, int(note["end"] * 1000))
-                add(members[idx], L_SIG, "on_swell", s_ms, e_ms,
-                    PALETTES["gold"])
-                n_melody += 1
+                for _t in _players(_phrase_of[_i]):
+                    _mem = _members_of(_t)
+                    if not _mem:
+                        continue
+                    # Map the note's pitch rank onto a member index. More
+                    # notes than props is normal -- several adjacent semitones
+                    # share a prop, which still preserves "melody goes up =
+                    # light moves right" as the readable gesture.
+                    _idx = int(note["degree"] * len(_mem) / max(1, n_deg))
+                    _idx = max(0, min(len(_mem) - 1, _idx))
+                    add(_mem[_idx], L_SIG, "on_swell", s_ms, e_ms,
+                        PALETTES["gold"])
+                    _played.add(_t["name"])
+                    n_melody += 1
             if melody_notes:
                 log(melody_notes[0]["start"], "melody",
-                    f"{len(melody_notes)} notes over {n_deg} pitches -> "
-                    f"{mel_target['name']} ({len(members)} members) by pitch height")
+                    f"{len(melody_notes)} notes over {n_deg} pitches across "
+                    f"{_n_phrases} phrases -> {', '.join(sorted(_played))} "
+                    f"by pitch height")
+                _mel_played = sorted(_played)
     print(f"Melody notes mapped: {n_melody}"
-          + (f" -> {mel_target['name']}" if n_melody else ""))
+          + (f" -> {', '.join(_mel_played)}" if n_melody and _mel_played else ""))
 
     # --- 2h. Vocal phrase entries ------------------------------------------
     # A small swell on whichever prop already carries the `vocal` voice, at
