@@ -24,11 +24,38 @@ from fseq_reader import read_fseq  # noqa: E402
 
 SHOW = Path(json.loads((Path(__file__).resolve().parents[1] / "config.json")
                        .read_text())["show_folders"]["christmas2026"])
-# strands x nodes-per-strand, from xlights_rgbeffects.xml
-GEO = {"Fence Matrix 1": (80, 32), "Fence Matrix 2": (80, 32),
-       "Front Center Window Matrix": (20, 32), "Front Left Window Matrix": (20, 32),
-       "Front Right Window Matrix": (20, 32), "Garage Door Matrix": (100, 32),
-       "Sun Room Window Matrix": (60, 32)}
+def _geometry() -> dict[str, tuple[int, int]]:
+    """Strands x nodes-per-strand, READ FROM THE LAYOUT.
+
+    This was a hardcoded table and it went stale the first time Krists changed
+    his hardware: Fence Matrix 1 went from 80x32 to 60x24 when he swapped in
+    the real controllers, and every measurement this tool made would have been
+    reading the wrong pixels while still printing confident numbers.
+    """
+    import xml.etree.ElementTree as ET
+    out: dict[str, tuple[int, int]] = {}
+    try:
+        root = ET.parse(next(SHOW.glob("xlights_rgbeffects.xml"))).getroot()
+    except (StopIteration, OSError, ET.ParseError):
+        return out
+    for m in root.iter("model"):
+        name = m.get("name", "")
+        if "Matrix" not in name or "Tunnel" in name:
+            continue
+        try:
+            strings = int(m.get("NumStrings") or 1)
+            per_string = int(m.get("NodesPerString") or 0)
+            strands_per = int(m.get("StrandsPerString") or 1)
+        except ValueError:
+            continue
+        strands = strings * strands_per
+        per_strand = per_string // max(strands_per, 1)
+        if strands >= 4 and per_strand >= 4:
+            out[name] = (strands, per_strand)
+    return out
+
+
+GEO = _geometry()
 ROWS = 16
 
 

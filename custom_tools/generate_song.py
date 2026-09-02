@@ -1890,6 +1890,11 @@ CONE_SHAPED = {"Mega Tree", "Tunnel Matrix Real"}
 PER_MODEL_GROUPS = {
     "Stars", "Window Stars", "Mini Trees", "Mini Tree Star",
     "Floods", "Orbs",
+    # Seven separate hanging spheres. Spanning one canvas across scattered
+    # objects can only light them one after another, which at rhythm speed
+    # reads as strobing rather than motion -- the same reason the Stars and
+    # Orbs are here.
+    "Hanging Spheres",
 }
 
 # Props that must never move quickly, whatever rhythm they're carrying.
@@ -1961,6 +1966,13 @@ MUST_HAVE_GROUPS = {
     # members it was too small to win the general weighted-sample trim
     # against much larger groups, every single run.
     "Mini Trees",
+    # Added to the layout Sep 2026 -- seven hanging spheres Krists is building:
+    # "I added them to a new group called Hanging Spheres, so please make sure
+    # you use them." A brand-new group loses the weighted-sample trim on every
+    # run, exactly as Mini Trees did: it reached add() with all seven members
+    # and was then sampled out of a ~70-slot cast drawn from ~200 groups, so
+    # nothing in the library targeted them at all.
+    "Hanging Spheres",
     # Same failure, found the same way, after "we're not really utilizing the
     # stars very much, they just have the whole house effects but don't seem
     # to do much of their own." The layout has a real 12-member "Stars" group
@@ -3451,12 +3463,28 @@ def main():
     # the tree anyway, and every guard keyed on the cast's view missed it.
     # What matters is what the renderer will do.
     _xgroups = layout.get("xlights_model_groups") or {}
+    # ...but never expand to a model Krists has switched off. This list is
+    # placed on MEMBER NAMES directly, bypassing the cast, so it was the one
+    # route by which disabled models still got sequenced: after he deleted the
+    # unused props and left others inactive, Gooey still carried 548 effects on
+    # Candy Cane 1-4, all of them Active="0". "They should not be sequenced if
+    # they're not visible or not active."
+    _inactive_models: set[str] = set()
+    try:
+        _rgbtxt = (SHOW_PATH / "xlights_rgbeffects.xml").read_text(errors="replace")
+        _inactive_models = {_m.group(1) for _m in
+                            re.finditer(r'<model name="([^"]*)"([^>]*)', _rgbtxt)
+                            if 'Active="0"' in _m.group(2)}
+    except OSError:
+        pass
     FLASH_SPLIT: dict[str, list[str]] = {}
     for _gname, _mem in _xgroups.items():
         if _gname in NO_FLAT_PROPS or not _mem:
             continue
         if any(_m in NO_FLAT_PROPS for _m in _mem):
-            _safe = [_m for _m in _mem if _m not in NO_FLAT_PROPS]
+            _safe = [_m for _m in _mem
+                     if _m not in NO_FLAT_PROPS
+                     and _m.split("/")[0] not in _inactive_models]
             if _safe:
                 FLASH_SPLIT[_gname] = _safe
             else:
