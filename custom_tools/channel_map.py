@@ -96,8 +96,22 @@ def decode(fseq_path: Path, models: list[str]) -> dict:
 
 def build(force: bool = False) -> dict:
     cache = SHOW_PATH / ".generation" / "channel_map.json"
+    # STALE IF THE LAYOUT IS NEWER. This cache silently outlived a layout
+    # change: Krists added seven Hanging Spheres, every tool that reads this
+    # map could not see them, and I concluded from their absence that xLights
+    # was not rendering them at all. It was -- peak 255, lit through 99% of
+    # the song -- and the only thing broken was this file being older than the
+    # layout it describes. A cache that answers confidently with stale data is
+    # worse than one that misses.
     if cache.exists() and not force:
-        return json.loads(cache.read_text())
+        try:
+            _rgb = next(SHOW_PATH.glob("xlights_rgbeffects.xml"))
+            _stale = _rgb.stat().st_mtime > cache.stat().st_mtime
+        except (StopIteration, OSError):
+            _stale = False
+        if not _stale:
+            return json.loads(cache.read_text())
+        print("channel map is older than the layout -- reprobing")
 
     sc = load_show_config(SHOW_PATH)
     models = sorted(m.name for m in sc.models)
