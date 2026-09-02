@@ -3392,6 +3392,17 @@ def main():
         return [e for e in all_effects if id(e) not in doomed_ids]
 
     def add(target_name, layer, key, start_ms, end_ms, palette, extra=None):
+        # A HANGING SPHERE NEVER JUST FLASHES -- enforced here for the same
+        # reason as the rule below: this is the one function every placement
+        # goes through, and the spheres were reached mostly by GROUP-level
+        # flashes expanded to member names, which never consult the per-target
+        # pool in beat_hit_key. Measured: 92% of the `On` on the spheres
+        # arrived that way, so adding fills and sparkle to that pool changed
+        # almost nothing until this existed.
+        if key in FLAT_KEYS and "hanging sphere" in (target_name or "").lower():
+            key = random.Random(f"sphere|{target_name}|{start_ms}").choice(
+                ["fill_up", "fill_down", "sphere_sparkle", "strand_stripes",
+                 "shockwave", "chase_mid_out", key])
         # NOTHING BIG FLAT-FLASHES -- enforced HERE, at the one function every
         # placement goes through.
         #
