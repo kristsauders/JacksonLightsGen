@@ -142,7 +142,19 @@ def detect_arpeggios(y: np.ndarray, sr: int, min_period=2, max_period=8, min_rep
             period, length, pcs = best_run
             start_idx = i
             end_idx = i + length
-            clean_pcs = [p if p is not None else pcs[k % len(pcs)] for k, p in enumerate(pcs)]
+            # A None here means the window was not clearly tonal. The old
+            # fallback read pcs[k % len(pcs)], which for a template of exactly
+            # `period` entries is the SAME element -- so a None stayed None and
+            # crashed on NOTE_NAMES[None] (hit on the Bluey trap remix, whose
+            # bass has sub-heavy notes with no clear pitch class). Carry the
+            # previous resolved note forward instead, falling back to the first
+            # resolved one; the guards above guarantee at least two exist.
+            _first = next(p for p in pcs if p is not None)
+            clean_pcs = []
+            _prev = None
+            for p in pcs:
+                _prev = p if p is not None else (_prev if _prev is not None else _first)
+                clean_pcs.append(_prev)
             runs.append({
                 "start_time": notes[start_idx][0],
                 "end_time": notes[end_idx - 1][0] + 0.15,

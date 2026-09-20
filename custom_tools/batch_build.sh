@@ -35,6 +35,19 @@ next_version() {
 # means every per-prop measurement reads the wrong pixels. Measured after one
 # round of Krists's changes: 168 of 227 models had shifted channels. Refreshed
 # here so it cannot be forgotten.
+# A render needs room. xLights does not fail loudly when the volume fills: it
+# quits with "cannot create file" partway through a batch, and a 20-song
+# rebuild leaves ~20 GB of .fseq behind. Measured once at 100% full with 401 GB
+# of old renders on the disk. Checked up front so the batch refuses rather than
+# dying halfway, and old renders are pruned to the newest two per song.
+FREE_GB=$(df -g "$SHOW" | awk 'NR==2 {print $4}')
+if [ "${FREE_GB:-0}" -lt 40 ]; then
+  echo "!! only ${FREE_GB}GB free on $SHOW -- need 40GB for a full batch."
+  echo "   Prune old renders first:  ls -t \"$SHOW\"/*.fseq | tail -n +40"
+  exit 1
+fi
+echo "[disk] ${FREE_GB}GB free"
+
 echo "[0/5] refreshing layout + channel map ..."
 $PY custom_tools/extract_layout.py >/dev/null 2>&1
 $PY -c "import sys; sys.path.insert(0,'custom_tools'); import channel_map; channel_map.build(force=True)" >/dev/null 2>&1
@@ -60,8 +73,12 @@ for SONG in "$@"; do
   fi
 
   echo "[3/5] generate ..."
+  # The filter must include the LATE GUARD lines. Without them a batch log
+  # shows the placement passes only, and the designer passes -- the arc, the
+  # rest rotation, the section colour, the dark-after-audio trim -- run
+  # invisibly, so a rebuild cannot be reviewed from its log.
   $PY custom_tools/generate_song.py "$SONG" --out "$SONG (v$V).xsq" 2>&1 \
-    | grep -E "Sections:|Harmony:|Vocals:|Instrument voices|Beat accent|Beat-locked|Run-up|Drum fills|Unison|Whole-house|placements across" \
+    | grep -E "Sections:|Harmony:|Vocals:|Instrument voices|Beat accent|Beat-locked|Run-up|Drum fills|Unison|Whole-house|placements across|Section arc:|Section colour:|Section shaders:|Section marking:|Rest rotation:|Pacing:|Arch leap:|Matrix bars:|Matrix shaders:|Sphere looks:|Spheres rhythmic:|Movement over flash:|Dark after audio:|Drop marking:" \
     | sed 's/^/      /'
 
   if [ ! -f "$SHOW/$SONG (v$V).xsq" ]; then echo "!! generate failed"; continue; fi

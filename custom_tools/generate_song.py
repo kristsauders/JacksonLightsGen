@@ -150,6 +150,10 @@ VSTACK = {"B_CHOICE_BufferStyle": "Vertical Stack"}
 # far faster than reasoning about geometry.
 PMSL = {"B_CHOICE_BufferStyle": "Per Model Single Line"}
 
+# Each strand its own buffer row, running ALONG the string: the sphere
+# equivalent of PMSL. See the note on the sphere keys for the measurement.
+VPS = {"B_CHOICE_BufferStyle": "Per Model Vertical Per Strand"}
+
 # LEARNED FROM KRISTS'S OWN SEQUENCES (the 2025 40fps set), by measuring what
 # he actually puts on outlines, flakes, mini trees and the window matrices.
 # Across 17 of his sequences the SingleStrand vocabulary on outline groups is:
@@ -278,6 +282,114 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     "chase_mid_out":  ("SingleStrand", _chase("From Middle")),
     "chase_mid_in":   ("SingleStrand", _chase("To Middle")),
     "chase_bounce":   ("SingleStrand", _chase("Bounce from Left")),
+    # --- THE ARCH LEAP, on the fours -----------------------------------------
+    # "Aperture would be a perfect song for arches to chase back and forth on
+    # the fourths rhythm. I don't see them though."
+    #
+    # They were there -- 191 of them in Aperture v174 -- and could not read:
+    # every one sat on a SINGLE arch (only 4 of 195 were on the `Arches` group)
+    # at a median span of 0.28s, with a chase running just 12% of the song.
+    # A chase confined to one arch cannot leap across the row, and 0.28s is a
+    # blink. Krists's own sequences put 4,703 arch chases on the `Arches` group
+    # at a median span of 1.00s -- one chase, one rotation, a beat long.
+    #
+    # `Single Line` (not Per Preview) is what makes the group read as ONE
+    # strand running arch 1 -> 4, so the dot leaps the whole row.
+    # `As Pixel`, NOT `Single Line`. This is the whole trick and I had it
+    # wrong twice. `Single Line` strings every PIXEL of all four arches into
+    # one strand, so the dot crawls through ~1,200 pixels and reads as a smear
+    # -- "not chasing or leaping at all, just chaotic". `As Pixel` makes each
+    # ARCH one pixel, so the light hops arch -> arch -> arch -> arch. That is
+    # the leap, and it is how Krists does it: 90 of the 107 `Bars` on his
+    # arches use `As Pixel`.
+    #
+    # One rotation across a whole 4-beat bar puts exactly one arch on each
+    # beat -- "a chase goes from left to right on the beat" -- and the
+    # direction flips with the bar so the row runs back and forth on the fours.
+    # BARS, not a chase. Third attempt, and this time it is simply what
+    # Krists uses: 90 of the 107 `Bars` on his arches are `As Pixel`, and he
+    # named it himself -- "it worked when we had done the leaping with bars I
+    # guess but we removed those?" A SingleStrand chase on `As Pixel` still
+    # renders as a chase running along a 4-pixel strand with head/tail fades,
+    # which is the "slow drift" he keeps seeing; `Bars` steps a hard-edged
+    # block from pixel to pixel, i.e. arch to arch, with nothing in between.
+    #
+    # `_bars` already defaults to PERPROP (`As Pixel`) for exactly this reason.
+    # One cycle across a 4-beat bar = one arch per beat.
+    "arch_four_lr":   ("Bars", _bars("Left", cycles="1", bars="1", highlight="1")),
+    "arch_four_rl":   ("Bars", _bars("Right", cycles="1", bars="1", highlight="1")),
+    # --- THE ACTUAL LEAP: a light travelling ALONG each arch's curve ---------
+    # "What I've been wanting is leaping arches, where a line or bar goes
+    # across each arch left to right as if it were a straight line but because
+    # it's arches it looks like a light leaping in a curved jump from side to
+    # side."
+    #
+    # This is a different gesture from lighting one whole arch per beat (which
+    # he is happy with and which stays). The motion is INSIDE the arch: each
+    # arch is 300 nodes whose string runs up one leg and down the other, so a
+    # dot chasing along them rises and falls -- the jump. `Single Line` strings
+    # all four arches into ONE 1200-node strand, so the dot leaps arch 1, then
+    # 2, then 3, then 4, crossing the house.
+    #
+    # Earlier attempts used this buffer and failed for a different reason: at
+    # 0.93s for 1200 nodes each arch was crossed in 0.23s, far too fast to see.
+    # Over a full 4-beat bar each arch gets a whole beat.
+    # EACH ARCH IS THREE ROWS. `LayerSizes=100,100,100`, `NodesPerArch=300`:
+    # three concentric rows of 100. Every chase-based attempt failed on this
+    # one fact -- `Single Line` flattens the arch into ONE 300-node strand in
+    # string order, so the dot runs the length of row 1, then row 2, then row
+    # 3. Krists saw precisely that: "I think I see each row chasing very very
+    # very fast, one after another."
+    #
+    # A light that LEAPS over the arch has to be a bar spanning all three rows
+    # travelling along its length. That means the arch's own 2D buffer (100
+    # wide x 3 high) and `Bars` moving Left/Right, which sweeps a vertical bar
+    # horizontally -- his own suggestion, and the right one.
+    # NOT `Bars`. `Bars` with BarCount=1 fills the WHOLE buffer -- measured on
+    # v189: 100% of every arch lit, all three rows, position pinned at 0.50.
+    # That is also why the earlier `As Pixel` version rendered flat white. One
+    # bar in xLights means "divide the buffer into one bar", i.e. a solid fill.
+    #
+    # `Per Model Vertical Per Strand` is the answer, and it is the same buffer
+    # that fixed the spheres: it gives each STRAND its own row and travels
+    # ALONG them. The arch's three 100-node rows are three strands running the
+    # length of the arch, so one chase moves a three-node-wide bar -- spanning
+    # all three rows -- from one foot, over the top, to the other.
+    # The third device Krists named: "do the spinning thing changing directions
+    # on the beat". `Per Model Horizontal Per Strand` travels ACROSS the
+    # strands rather than along them -- on the spheres that was the unwanted
+    # "spinning" look, and on a three-row arch it is exactly the spin he wants,
+    # the rows lighting in turn around the arch's section.
+    "arch_leap_vps":  ("SingleStrand", _chase(
+        "Left-Right", fade="From Head", chases="1", rotations="1.0",
+        buffer=dict(VPS))),
+    "arch_leap_vps_r": ("SingleStrand", _chase(
+        "Right-Left", fade="From Head", chases="1", rotations="1.0",
+        buffer=dict(VPS))),
+    # RETIRED. `Per Model Horizontal Per Strand` travels ACROSS an arch's three
+    # rows instead of along them, which renders as the rows lighting in turn --
+    # "at 2:48 and at 3:50 the arches are doing a weird inner ring, middle
+    # ring, outer ring and back movement that's different for each arch and not
+    # set to the beat, and that's wrong." Kept only so the recipe is not lost.
+    "arch_spin_f":    ("SingleStrand", _chase(
+        "Left-Right", fade="From Head", chases="1", rotations="1.0",
+        buffer={"B_CHOICE_BufferStyle": "Per Model Horizontal Per Strand"})),
+    "arch_spin_b":    ("SingleStrand", _chase(
+        "Right-Left", fade="From Head", chases="1", rotations="1.0",
+        buffer={"B_CHOICE_BufferStyle": "Per Model Horizontal Per Strand"})),
+    "arch_leap_row":  ("SingleStrand", _chase(
+        "Left-Right", fade="From Head", chases="1", rotations="1.0",
+        buffer=dict(VPS))),
+    "arch_leap_row_r": ("SingleStrand", _chase(
+        "Right-Left", fade="From Head", chases="1", rotations="1.0",
+        buffer=dict(VPS))),
+    # All four leaping AT ONCE, each inside its own geometry -- the same jump,
+    # read as one wide gesture instead of a travelling one. `Per Model Single
+    # Line` is the buffer Krists uses most on his own arch chases (3,747 of
+    # them).
+    "arch_leap_all":  ("SingleStrand", _chase(
+        "Left-Right", fade="From Head", chases="1", rotations="1.0",
+        buffer={"B_CHOICE_BufferStyle": "Per Model Single Line"})),
     # --- the human vocabulary, added 2026-08-29 -------------------------------
     # Same gestures Krists reaches for, with the settings he actually uses:
     # per-model-per-preview buffers so each prop performs the chase in its own
@@ -611,19 +723,190 @@ EFFECTS: dict[str, tuple[str, dict]] = {
                                 "P2=0.00|RV=TRUE|",
                                 "E_CHECKBOX_Fill_Wrap": "0",
                                 "B_CHOICE_BufferStyle": "Per Model Default"}),
-    # ALTERNATING STRANDS. Per Model Horizontal Per Strand gives each strand
-    # its own row of the buffer, so a two-colour palette lands different
-    # colours on neighbouring strands instead of blending across the sphere.
-    # Another buffer style measured straight out of his sequences.
+    # THE BUFFER DECIDES WHICH WAY A SPHERE MOVES, and getting it wrong is
+    # what produced "the spinning thing". Measured, chasing a sphere with
+    # `Per Model Horizontal Per Strand`:
+    #
+    #     t+0.4s  lit 1/8 strands   t+2.0s  lit 1/8   t+3.6s  lit 1/8
+    #             strand 0 lit              strand 4          strand 7
+    #
+    # -- one whole strand at a time, walking around the sphere. That is a
+    # SPIN, not up/down travel, and it was on every sphere chase in the show:
+    # "The spheres just keep doing the spinning thing really often."
+    #
+    # `Per Model Vertical Per Strand` gives each strand its own buffer row
+    # running ALONG the string, so the same chase travels the length of every
+    # strand at once -- measured centroid 2.9 -> 8.9 -> 15.9 -> 21.9 -> 27.9
+    # with all 8 strands lit throughout. That is the vertical-strip idiom
+    # ("The verticals have I think a single strand chase or something that
+    # moves up and down to the rhythm") applied to a sphere. Every sphere key
+    # below uses it, so no code path can reintroduce the spin.
     "strand_stripes": ("Color Wash",
                        {"E_CHECKBOX_ColorWash_VFade": "1",
                         "E_CHECKBOX_ColorWash_CycleCount": "1",
-                        "B_CHOICE_BufferStyle": "Per Model Horizontal Per Strand"}),
+                        "B_CHOICE_BufferStyle": "Per Model Vertical Per Strand"}),
+    # A MELODY NOTE IS NOT A FLAT FLASH, even though it renders as one. It has
+    # to stay a clean single-prop light so the pitch mapping is readable -- the
+    # sphere substitution below rewrites FLAT_KEYS into fills and sparkle, and
+    # it was silently turning every melody note into a three-second fill, which
+    # is why the melody was inaudible on the house even though the pass was
+    # placing it correctly.
+    # MEASURED, don't swap these back for a Color Wash. "Different colours for
+    # alternating strands" needs an effect that colours each strand row
+    # SEPARATELY. Color Wash does not: with VFade or HFade over the per-strand
+    # buffer every one of the 8 strands rendered the SAME hue (231/231/231...),
+    # a wash of the whole sphere. Meteors in Palette mode over the same buffer
+    # measured 8 different per-strand levels and 3-4 hues at once, re-rolled
+    # every frame -- the "different shape across them all" look, and bright
+    # (level 72-86 vs 4 for the first sparkle attempt). Explode mode measured
+    # level 7: too dim for a prop this small, don't use it here.
+    "sphere_rain":    ("Meteors", {"E_CHOICE_Meteors_Effect": "Down",
+                                   "E_CHOICE_Meteors_Type": "Palette",
+                                   "E_SLIDER_Meteors_Count": "40",
+                                   "E_SLIDER_Meteors_Length": "35",
+                                   "B_CHOICE_BufferStyle":
+                                       "Per Model Vertical Per Strand"}),
+    "sphere_rain_up": ("Meteors", {"E_CHOICE_Meteors_Effect": "Up",
+                                   "E_CHOICE_Meteors_Type": "Palette",
+                                   "E_SLIDER_Meteors_Count": "40",
+                                   "E_SLIDER_Meteors_Length": "35",
+                                   "B_CHOICE_BufferStyle":
+                                       "Per Model Vertical Per Strand"}),
+    # Three dots travelling the strands at once instead of one: measured 3
+    # separate strands lit and moving each frame, so the sphere reads as
+    # several things moving rather than a single band.
+    "sphere_dots":    ("SingleStrand", {"E_CHECKBOX_Chase_Group_All": "0",
+                                        "E_CHOICE_Chase_Type1": "Left-Right",
+                                        "E_CHOICE_Fade_Type": "From Head",
+                                        "E_CHOICE_SingleStrand_Colors": "Palette",
+                                        "E_NOTEBOOK_SSEFFECT_TYPE": "Chase",
+                                        "E_SLIDER_Number_Chases": "3",
+                                        "E_TEXTCTRL_Chase_Rotations": "2"}),
+    # UP AND DOWN THE STRINGS -- the sphere's version of `strand_bounce`,
+    # which is what the vertical strips use and what he pointed at. Bounce
+    # from Left measured travelling down and back within one effect
+    # (5.9 -> 26.8 -> 0.6), so a single placement is a complete up-and-down
+    # gesture and does not need a partner effect to come back.
+    "sphere_bounce":  ("SingleStrand",
+                       {**_chase("Bounce from Left", span=False), **VPS}),
+    "sphere_up":      ("SingleStrand",
+                       {**_chase("Right-Left", span=False), **VPS}),
+    "sphere_down":    ("SingleStrand",
+                       {**_chase("Left-Right", span=False), **VPS}),
+    # Two dots, two round trips -- for a busier beat.
+    "sphere_bounce2": ("SingleStrand",
+                       {**_chase("Bounce from Left", span=False,
+                                 chases="2", rotations="2.0"), **VPS}),
+    # FLASH AND FADE. "I want some more flashing and fading like what the
+    # other props like corner verticals or matrix outline verticals do."
+    # Spheres are small props, so the no-flash rule that protects the mega
+    # tree and the matrices does not apply to them.
+    "sphere_flash":   ("On", {"T_TEXTCTRL_Fadein": "0.03",
+                              "T_TEXTCTRL_Fadeout": "0.30"}),
+    "sphere_pulse":   ("On", {"T_TEXTCTRL_Fadein": "0.10",
+                              "T_TEXTCTRL_Fadeout": "0.45"}),
+    # PER-STRAND COLOUR. "Using different colors for each strand." Bars on
+    # the per-strand buffer paints each STRING one solid colour -- measured
+    # 99-100% purity on both sphere geometries -- where Butterfly and Color
+    # Wash mix colours inside a strand (43% purity) and read as a wash.
+    #   BarCount 1: blocks of 3-4 strands per colour (GGGGRRRRBB), and one
+    #               cycle over four beats rotates the blocks a quarter turn
+    #               per beat around the sphere.
+    #   BarCount 4: strand-by-strand alternation (GRBGRBGRBG on 10 strands,
+    #               RBGRBGRB on 8).
+    # These are Bars, which the library retired on matrices; the sphere pass
+    # tags them X_Sphere and the Bars guards leave tagged effects alone.
+    "sphere_stripes": ("Bars", {**VPS, "E_CHECKBOX_Bars_3D": "0",
+                                "E_CHECKBOX_Bars_Gradient": "0",
+                                "E_CHECKBOX_Bars_Highlight": "0",
+                                "E_CHOICE_Bars_Direction": "up",
+                                "E_SLIDER_Bars_BarCount": "1",
+                                "E_TEXTCTRL_Bars_Cycles": "1"}),
+    "sphere_stripes_fine": ("Bars", {**VPS, "E_CHECKBOX_Bars_3D": "0",
+                                     "E_CHECKBOX_Bars_Gradient": "0",
+                                     "E_CHECKBOX_Bars_Highlight": "0",
+                                     "E_CHOICE_Bars_Direction": "up",
+                                     "E_SLIDER_Bars_BarCount": "4",
+                                     "E_TEXTCTRL_Bars_Cycles": "0"}),
+    # A solid colour with no fade, for changing colour ON the beat. Gapless
+    # back to back, so the change is a colour cut rather than a blink.
+    "sphere_colour":  ("On", {}),
+    # A BIG BAR AS RHYTHM, on the matrices. Bars were retired on matrices
+    # after they read as "diagonal bars changing orientation" -- the fault was
+    # the orientation FLIPPING mid-phrase, not the bar itself. Direct request:
+    # "we can use things like a big bar going across side to side, or up down,
+    # as rhythm too." These keep one orientation for a whole section, land on
+    # the bar line and fade, and carry their own tag so the Bars discipline
+    # guard leaves them alone.
+    # ONE bar, crossing on the beat. "All the bars effects on the matrices are
+    # not showing rhythm, it's not a single bar going across on the beat,
+    # instead I see multiple bars of different colors just slowly going
+    # across." All three complaints were literally in the settings: BarCount
+    # was 2, the span was a whole 4-beat bar of music (1.86s at 129 BPM) for
+    # one cycle, and the palette was the section's full multi-colour one.
+    # Krists's own sequences: `Bars_BarCount=1`, `Bars_Cycles=1.0`, median
+    # duration 0.26s -- a single bar that snaps across, not a drift.
+    "matrix_bar_lr":  ("Bars", {**PERMODEL, "E_CHECKBOX_Bars_3D": "0",
+                                "E_CHECKBOX_Bars_Gradient": "0",
+                                "E_CHECKBOX_Bars_Highlight": "1",
+                                "E_CHOICE_Bars_Direction": "Left",
+                                "E_SLIDER_Bars_BarCount": "1",
+                                "E_TEXTCTRL_Bars_Cycles": "1",
+                                "T_TEXTCTRL_Fadeout": "0.35"}),
+    "matrix_bar_rl":  ("Bars", {**PERMODEL, "E_CHECKBOX_Bars_3D": "0",
+                                "E_CHECKBOX_Bars_Gradient": "0",
+                                "E_CHECKBOX_Bars_Highlight": "1",
+                                "E_CHOICE_Bars_Direction": "Right",
+                                "E_SLIDER_Bars_BarCount": "1",
+                                "E_TEXTCTRL_Bars_Cycles": "1",
+                                "T_TEXTCTRL_Fadeout": "0.35"}),
+    "matrix_bar_up":  ("Bars", {**PERMODEL, "E_CHECKBOX_Bars_3D": "0",
+                                "E_CHECKBOX_Bars_Gradient": "0",
+                                "E_CHECKBOX_Bars_Highlight": "1",
+                                "E_CHOICE_Bars_Direction": "up",
+                                "E_SLIDER_Bars_BarCount": "1",
+                                "E_TEXTCTRL_Bars_Cycles": "1",
+                                "T_TEXTCTRL_Fadeout": "0.35"}),
+    "matrix_bar_dn":  ("Bars", {**PERMODEL, "E_CHECKBOX_Bars_3D": "0",
+                                "E_CHECKBOX_Bars_Gradient": "0",
+                                "E_CHECKBOX_Bars_Highlight": "1",
+                                "E_CHOICE_Bars_Direction": "down",
+                                "E_SLIDER_Bars_BarCount": "1",
+                                "E_TEXTCTRL_Bars_Cycles": "1",
+                                "T_TEXTCTRL_Fadeout": "0.35"}),
+    "melody_note":    ("On", {"T_TEXTCTRL_Fadein": "0.05",
+                              "T_TEXTCTRL_Fadeout": "0.35"}),
+    # Strands lit in turn rather than the whole sphere at once. Per Model
+    # Horizontal Per Strand puts each strand on its own buffer row, so a chase
+    # across the rows flashes one strand after another -- "we should be able to
+    # use them more rhythmically by flashing different strands with different
+    # colors."
+    "sphere_strands": ("SingleStrand",
+                       {**_chase("Left-Right", fade="From Head", span=False),
+                        "B_CHOICE_BufferStyle": "Per Model Vertical Per Strand"}),
+    "sphere_strands_rev": ("SingleStrand",
+                           {**_chase("Right-Left", fade="From Head", span=False),
+                            "B_CHOICE_BufferStyle": "Per Model Vertical Per Strand"}),
+    # ...and the same idea unordered, so the lit strands make a different shape
+    # each time instead of a travelling band: "sometimes randomizing it so you
+    # see a different shape across them all."
+    # Count 8 measured at a mean level of 4 -- technically lit, invisible in
+    # practice. 45 with a short step lights a good share of the strands at once
+    # and re-rolls which ones, which is the "different shape across them all".
+    "sphere_scatter": ("Twinkle", {"E_SLIDER_Twinkle_Count": "45",
+                                   "E_SLIDER_Twinkle_Steps": "4",
+                                   "E_CHECKBOX_Twinkle_Strobe": "0",
+                                   "E_CHECKBOX_Twinkle_ReRandom": "1",
+                                   "B_CHOICE_BufferStyle":
+                                   "Per Model Vertical Per Strand"}),
+    # Per-strand buffer, not Per Model Default: on a sphere the default
+    # buffer lit only every other strand (measured m.m.m.m. -- half the prop
+    # permanently dark), which is part of why the spheres read as dark.
     "sphere_sparkle": ("Twinkle", {"E_SLIDER_Twinkle_Count": "40",
                                    "E_SLIDER_Twinkle_Steps": "12",
                                    "E_CHECKBOX_Twinkle_Strobe": "0",
                                    "E_CHECKBOX_Twinkle_ReRandom": "1",
-                                   "B_CHOICE_BufferStyle": "Per Model Default"}),
+                                   "B_CHOICE_BufferStyle": "Per Model Vertical Per Strand"}),
     # --- bursts ---
     "on_hit":         ("On", {"T_TEXTCTRL_Fadein": "0.02", "T_TEXTCTRL_Fadeout": "0.12"}),
     "on_pop":         ("On", {"T_TEXTCTRL_Fadein": "0.01", "T_TEXTCTRL_Fadeout": "0.22"}),
@@ -1577,6 +1860,239 @@ PULSE_MODE_OVERRIDE: dict[str, str] = {
     "Meridian": "groove",
 }
 
+# ---------------------------------------------------------------------------
+# PER-SONG PLAN: sections, and the look of each one
+# ---------------------------------------------------------------------------
+#
+# Krists: "consider if we want to add more types of customizations... specific
+# groups of effects or shaders to set in specific sections so it's less random
+# and more thoughtful."
+#
+# Three things can now be decided per song instead of rolled:
+#
+#   SONG_SECTIONS      the section grid itself -- (start_time, label) pairs.
+#                      The structure detector is good at finding THAT something
+#                      changes and poor at finding exactly WHEN. Measured on the
+#                      Bluey remix: its eight uniform ~14.9s blocks scored 0.331
+#                      mean novelty at their boundaries, while the real
+#                      arrangement -- read off a bar-by-bar energy map -- scores
+#                      far higher and puts every boundary on a bar line, so
+#                      sections change exactly on the beat.
+#   SONG_SECTION_LOOK  per section index: pin the palette and/or the shared
+#                      hero-canvas shader. Everything unpinned keeps rolling as
+#                      before, so this is additive.
+#   SONG_PALETTE_FAMILY already existed; the list may be any length (only the
+#                      random fallback is capped at PALETTE_FAMILY_SIZE), so a
+#                      song can carry four or five palettes rather than three.
+#
+# Section indices refer to SONG_SECTIONS order for songs that define it.
+SONG_SECTIONS: dict[str, list[tuple[float, str]]] = {
+    # --- Aperture ------------------------------------------------------------
+    # Read off the bar grid with song_map.py (bar = 1.858s, first downbeat
+    # 0.13s). Every boundary below is an exact bar line.
+    #
+    # The DETECTOR gave 19 sections of almost exactly 16.0s each -- a uniform
+    # grid, not a reading of the music. Through bars 65-148 the energy is flat
+    # at 0.55 and nothing changes, yet it placed boundaries at 90.6, 106.8,
+    # 122.5, 138.1, 153.8, 170.0, 201.8, 217.5, 233.2, 249.2 and 265.0. A look
+    # change at one of those lands on no musical event at all, which is what
+    # Krists hears as "the looks sometimes change a few beats early".
+    #
+    # What the bar map actually shows:
+    #   bars   0-15   e0.14 bass0.26 hats0.00   intro, no drums
+    #   bar   16      e0.45 bass1.07            DROP 1 (cue at 30.07)
+    #   bars  16-23   e0.52 hats0.06            chorus, still no hats
+    #   bar   24      e0.35 hats0.43            break
+    #   bars  25-31   e0.20 hats0.24-0.54       verse
+    #   bars  32-33   e0.38 -> 0.52             build into DROP 2 (cue 60.09)
+    #   bars  33-39   e0.52 hats0.06-0.18       chorus
+    #   bars  40-47   hats 0.54 -> 0.93         HATS ENTER
+    #   bars  48-64   hats 1.25-1.86            driving
+    #   bar   65      e0.56                     lift (cue 118.77)
+    #   bars  76-80   bass 0.92-1.10            dip (cue 148.77)
+    #   bars  81-92   e0.55                     chorus
+    #   bars  93-100  e0.31-0.38 bass0.62       BREAK
+    #   bar  101      e0.55                     DROP 3 (cue 187.64)
+    #   bars 115-116  e0.49                     small dip
+    #   bars 149-150  hats 0.59 -> 0.06         HATS LEAVE
+    #   bar  162      e0.15                     outro
+    "Aperture": [
+        (0.13, "intro"), (29.85, "chorus"), (44.71, "break"), (46.57, "verse"),
+        (59.57, "build"), (61.43, "chorus"), (74.43, "chorus"),
+        (89.29, "chorus"), (120.87, "chorus"), (141.31, "break"),
+        (150.60, "chorus"), (172.89, "break"), (187.75, "chorus"),
+        (217.47, "chorus"), (249.05, "chorus"), (276.91, "outro"),
+        (301.06, "outro"),
+    ],
+    # --- 12 to 12 ------------------------------------------------------------
+    # bar = 1.950s, first downbeat 0.63s. A uniformly driving track: energy
+    # sits at 0.67-0.77 from bar 2 to bar 116 with only four real events in it
+    # (4.53 in, 12.33 peak, 189.83 breakdown, 197.63 return). The detector
+    # invented 20 sections over that, including five 1-second "transition"
+    # fragments at the end -- 235.89, 237.15, 238.56, 239.72, 240.86, all of
+    # them after the music has stopped.
+    #
+    # The sub-structure that IS real is carried by the hats, so the interior
+    # boundaries below are placed where the hat density actually turns:
+    #   bar  16  31.84s  hats 1.16 -> 0.70
+    #   bar  24  47.44s  hats 0.70 -> 1.29
+    #   bar  32  63.05s  hats 1.02 -> 0.71
+    #   bar  36  70.85s  hats 0.71 -> 1.34
+    #   bar  44  86.45s  hats 1.04 -> 0.70
+    #   bar  56 109.86s  hats 0.83 -> 1.19
+    #   bar  68 133.26s  e 0.72 -> 0.61   (the one real interior dip)
+    #   bar  76 148.87s  hats 0.74 -> 1.38
+    #   bar  88 172.27s  e 0.70 -> 0.77
+    "12 to 12": [
+        (0.63, "intro"), (4.53, "chorus"), (12.33, "chorus"), (31.84, "verse"),
+        (47.44, "chorus"), (63.05, "verse"), (70.85, "chorus"),
+        (86.45, "verse"), (109.86, "chorus"), (133.26, "break"),
+        (148.87, "chorus"), (172.27, "chorus"), (189.83, "break"),
+        (197.63, "chorus"), (226.89, "outro"), (230.79, "outro"),
+    ],
+    # Read off the bar grid (bar = 1.858s, first downbeat 0.07s). Every
+    # boundary is a bar line. Energy per bar, from the audio:
+    #   bars  0-7   e~0.46 bass~1.38  full-energy intro, beat already running
+    #   bars  8-9   e~0.20 bass~0.25  breakdown, hats climbing -> build
+    #   bars 10-15  e~0.47 bass~1.25  DROP 1
+    #   bars 16-17  e~0.20 bass~0.38  breakdown
+    #   bars 18-25  e~0.44 bass~1.15  DROP 2
+    #   bars 26-27  e~0.19 bass~0.15  breakdown, near-empty (this is where the
+    #                                 beat tracker wobbled: 580ms gaps)
+    #   bars 28-39  e~0.32 bass~0.62  mid section, half energy
+    #   bars 40-47  e~0.43 bass~1.10  DROP 3
+    #   bars 48-53  e~0.59 bass~1.67  CLIMAX -- loudest, bassiest of the song
+    #   bars 54-55  e~0.41 bass~1.03  dip
+    #   bars 56-57  e~0.55 bass~1.61  final stab, then silence from 107.8s
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW": [
+        (0.07, "intro"), (14.93, "build"), (18.65, "chorus"),
+        (29.79, "build"), (33.51, "chorus"), (48.37, "break"),
+        (52.08, "verse"), (74.37, "chorus"), (89.23, "chorus"),
+        (100.38, "break"), (104.10, "outro"),
+    ],
+    # Ariana Grande's "December" (Christmas & Chill, 2015) as a trap remix:
+    # 95.7 BPM, bar 2.508s, 172s. Read off song_map.py; every boundary is a bar
+    # line. The detector's 13 sections sat 350-870ms off the bar grid with
+    # novelty of 0.01-0.10 at most boundaries, plus three 1-second slivers of
+    # junk at the very end.
+    #   bars  0-1   e0.03            two bars of near-silence (the bells)
+    #   bars  2-5   e0.22 bass0.70   verse, half energy
+    #   bars  6-9   e0.37 bass1.10   the hook lands (lift 6.50x at 14.3s)
+    #   bars 10-17  e0.28 bass0.50   verse, hat-heavy (bar 17 is hats-only)
+    #   bars 18-25  e0.39 bass1.45   chorus, bassy
+    #   bars 26-29  e0.19 bass0.31   BREAKDOWN -- the quietest bars with a beat
+    #   bars 30-33  e0.27 bass0.87   verse returns
+    #   bars 34-41  e0.29 bass0.60   pre-chorus, hats climbing to 2.02
+    #   bars 42-49  e0.39 bass1.40   chorus
+    #   bars 50-56  e0.46 bass1.78   CLIMAX -- loudest, bassiest of the song
+    #   bars 57-58  e0.32 bass0.80   dip, with a real hush (0.41) before
+    #   bars 59-65  e0.41 bass1.29   final chorus
+    #   bar  66+                     tail, silent from 168.1s
+    "Ariana Grande - December (OFFICIAL TRAP REMIX)": [
+        (0.08, "intro"), (5.10, "verse"), (15.13, "chorus"), (25.16, "verse"),
+        (45.22, "chorus"), (65.28, "break"), (75.31, "verse"), (85.34, "build"),
+        (105.41, "chorus"), (125.47, "chorus"), (143.02, "break"),
+        (148.04, "chorus"), (165.59, "outro"),
+    ],
+}
+
+# Per section: {"palette": name, "shader": key}. Either may be omitted.
+# Keyed by the section's START TIME, not its index: the generator splits
+# sections at energy step-downs and merges sub-2-bar slivers AFTER the plan is
+# applied, so indices drift. Measured on the first Bluey build -- an 11-entry
+# plan became 12 sections then merged to 10, and every pin from the second
+# section on landed a section late (the climax got `resin` instead of
+# `climax`). A time key is stable under both operations.
+# Ambient windows per song, overriding the energy-based detector. An empty
+# list means "this song never goes ambient".
+SONG_AMBIENT: dict[str, list[tuple[float, float]]] = {
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW": [],
+}
+
+# WHERE THE SHOW PEAKS, per song. By default the arc peaks at the loudest
+# section, which is usually right and sometimes exactly wrong: on the Bluey
+# remix the drama is the FIRST drop, because a Bluey theme turning into heavy
+# trap is the surprise the whole show is built on -- "I actually do want the
+# first drop to be the climax, because it's such a dramatic intro and it's
+# unexpectedly heavy for a Bluey song." Naming a section start here makes it
+# the brightest moment, holds everything else below it, and makes its drop the
+# climax drop for staging and palette purposes.
+SONG_CLIMAX: dict[str, list[float]] = {
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW": [18.65],
+}
+
+# The drops worth staging, per song, read off the energy map by hand.
+SONG_DROPS: dict[str, list[float]] = {
+    # bars 10, 18, 40, 48, 56 -- the climax at 89.23 is the loudest six bars
+    # of the track (e 0.59, bass 1.67) and the 104.10 stab is its last word.
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW":
+        [18.65, 33.51, 74.37, 89.23, 104.10],
+    # The beat arriving out of silence, the hook, both big choruses, the
+    # return after the breakdown, the climax, and the final chorus -- which is
+    # the only one with a measured hush in front of it (0.41).
+    "Ariana Grande - December (OFFICIAL TRAP REMIX)":
+        [5.10, 15.13, 45.22, 75.31, 105.41, 125.47, 148.04],
+}
+
+SONG_SECTION_LOOK: dict[str, dict[float, dict[str, str]]] = {
+    # A kids'-show theme as a trap remix: Bluey's own blue as the identity,
+    # the Bluey/Bingo blue-and-orange pairing on the first drop, cartoon-bright
+    # palettes on the later drops, and the gold-and-blue `climax` palette on
+    # the loudest six bars. Builds deliberately reuse ONE shader
+    # (frost_growth, which creeps outward) so that a build reads as a build
+    # rather than as another random change.
+    # COLD OUTSIDE, WARM INSIDE. The lyric is about keeping someone warm
+    # "through the wintertime", and the track is an intimate R&B Christmas
+    # song rather than a festive one -- so deliberately NOT the primary-red
+    # `xmas`/`holly` look. Verses are icy blue and run Rain on Glass (a winter
+    # window); choruses are warm amber and run Falling Embers; builds and
+    # breakdowns run Frost Growth, so the cold literally creeps back in when
+    # the song strips down. Each role keeps its own shader so a verse reads as
+    # a verse. The climax gets `smoulder` and Stained Glass -- Christmas glass
+    # at the hottest point of the song.
+    "Ariana Grande - December (OFFICIAL TRAP REMIX)": {
+        0.08:   {"palette": "glacier",  "shader": "shader_frost_growth"},
+        5.10:   {"palette": "ice",      "shader": "shader_rain_on_glass"},
+        15.13:  {"palette": "ember",    "shader": "shader_falling_embers"},
+        25.16:  {"palette": "ice",      "shader": "shader_rain_on_glass"},
+        45.22:  {"palette": "ember",    "shader": "shader_falling_embers"},
+        65.28:  {"palette": "glacier",  "shader": "shader_frost_growth"},
+        75.31:  {"palette": "ice",      "shader": "shader_rain_on_glass"},
+        85.34:  {"palette": "velvet",   "shader": "shader_velvet_nap"},
+        105.41: {"palette": "peach",    "shader": "shader_slow_dawn"},
+        125.47: {"palette": "smoulder", "shader": "shader_stained_glass"},
+        143.02: {"palette": "glacier",  "shader": "shader_frost_growth"},
+        148.04: {"palette": "ember",    "shader": "shader_falling_embers"},
+        165.59: {"palette": "peach",    "shader": "shader_slow_dawn"},
+    },
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW": {
+        0.07:   {"palette": "chrome",  "shader": "shader_liquid_chrome"},
+        14.93:  {"palette": "glacier", "shader": "shader_frost_growth"},
+        18.65:  {"palette": "cinema",  "shader": "shader_iso_blocks"},
+        29.79:  {"palette": "glacier", "shader": "shader_frost_growth"},
+        33.51:  {"palette": "candy",   "shader": "shader_stained_glass"},
+        48.37:  {"palette": "dusk",    "shader": "shader_smoke_drift"},
+        52.08:  {"palette": "chrome",  "shader": "shader_contour_drift"},
+        74.37:  {"palette": "resin",   "shader": "shader_oil_film"},
+        89.23:  {"palette": "climax",  "shader": "shader_fracture"},
+        100.38: {"palette": "glacier", "shader": "shader_smoke_drift"},
+        104.10: {"palette": "climax",  "shader": "shader_iso_blocks"},
+    },
+}
+
+# A typo in a per-section pin fails loudly here rather than silently falling
+# back to a rolled choice halfway through a song. Placed after the plans are
+# defined -- SHADER_KEYS is built much earlier in the file.
+for _sng, _plan in SONG_SECTION_LOOK.items():
+    for _si, _pin in _plan.items():
+        if _pin.get("shader") and _pin["shader"] not in SHADER_KEYS:
+            raise SystemExit(f"SONG_SECTION_LOOK[{_sng!r}][{_si}]: unknown "
+                             f"shader {_pin['shader']!r}")
+        if _pin.get("palette") and _pin["palette"] not in PALETTES:
+            raise SystemExit(f"SONG_SECTION_LOOK[{_sng!r}][{_si}]: unknown "
+                             f"palette {_pin['palette']!r}")
+
+
 SONG_PALETTE_FAMILY: dict[str, list[str]] = {
     # The 2026-08-16 batch: seven cinematic/atmospheric tracks (four ODESZA,
     # CloZee, Catching Flies, ROYA). Chosen by ear against each track's
@@ -1596,6 +2112,14 @@ SONG_PALETTE_FAMILY: dict[str, list[str]] = {
     "The WhatsApp Shakespeare":  ["velvet", "smoulder", "regal"],
     "Too Slow (All Night)":      ["chrome", "glacier", "neon"],
     "12 to 12":                  ["dusk", "chrome", "velvet"],
+    # Four rather than three: the remix cycles through more distinct moods
+    # than a three-palette family can cover, and the per-section pins above
+    # decide which lands where.
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW":
+        ["chrome", "cinema", "candy", "resin"],
+    # Cold and warm alternating, which is the whole concept of the show.
+    "Ariana Grande - December (OFFICIAL TRAP REMIX)":
+        ["ice", "ember", "glacier", "peach", "velvet"],
     "World Is Mine":             ["neon", "peach", "resin"],
     "Aperture":                  ["cinema", "grove", "chrome"],
     "Fara":                      ["glacier", "dusk", "abyss"],
@@ -1879,6 +2403,16 @@ def beat_pulse_palette(palette: ColorPalette, beat_times: list[float],
 HERO_MODELS = {
     "Mega Tree", "Garage Roof", "Sun Room Window Matrix", "Megatree Star",
     "Showstopper Snowflake", "Showstopper Spinner", "Sphere-2", "Sphere-3 Inner",
+    # Added Sep 2026, replacing the three front window matrices with a single
+    # wide one spanning all three windows: "the new matrix will be exactly the
+    # same as the garage door matrix". It is 3200 nodes across 20 strands, so
+    # it qualifies as `large` on its own, but it needs a guaranteed individual
+    # slot the way Sun Room does -- otherwise the one prop that replaced a
+    # whole three-model ensemble can be absorbed into a group and wasted.
+    # Its Verticals / Horizontals / Left+Right Vertical submodels are already
+    # members of the House/Window/Other outline groups in the layout, so the
+    # outline passes reach them without a code change.
+    "Upper Window Matrix",
     # "Tunnel Matrix Real" IS the real, wired walk-through tunnel and must be
     # sequenced as a centrepiece. Corrected 2026-08-09 after a misreading of
     # earlier feedback: it is the ~40-80 "Tunnel Arches N" models that are
@@ -1908,6 +2442,97 @@ SYMMETRY_FAMILIES: dict[str, list[str]] = {
         "Front Center Window Matrix", "Front Left Window Matrix", "Front Right Window Matrix",
     ],
 }
+
+# THE FLAT RECTANGULAR CANVASES, as one set. Every pass that gives the
+# matrices rhythm must use this and nothing else.
+#
+# "I notice the garage roof matrix often acts very differently from the other
+# matrices. Is that on purpose? I thought we had made sure the matrices were
+# all generally doing similar things so it's cohesive."
+#
+# It was not on purpose -- it was a name test. `Garage Roof` is an 18,576
+# channel matrix, the second largest flat canvas in the show, but it is the one
+# whose NAME does not contain "matrix", and both matrix rhythm passes selected
+# their targets with `"matrix" in name.lower()`. So it received none of the
+# beat-locked shader work and none of the bar sweeps while all eight of its
+# neighbours did. The Tunnel is deliberately excluded instead: it is a tube,
+# not a panel, and a flat sweep reads wrong wrapped around it.
+_INACTIVE_MODELS: set[str] | None = None
+
+
+def inactive_models() -> set[str]:
+    """Models Krists has switched off. They render nothing, so an effect on one
+    is simply thrown away -- measured, the three retired Front Window Matrices
+    were still taking 264 placements each."""
+    global _INACTIVE_MODELS
+    if _INACTIVE_MODELS is None:
+        try:
+            _txt = (SHOW_PATH / "xlights_rgbeffects.xml").read_text(errors="ignore")
+            _INACTIVE_MODELS = set(
+                re.findall(r'name="([^"]+)"[^>]*Active="0"', _txt))
+        except Exception:
+            _INACTIVE_MODELS = set()
+    return _INACTIVE_MODELS
+
+
+_MODEL_DIR: dict[str, str] | None = None
+
+
+def model_wiring_dir(name: str) -> str:
+    """The model's `Dir` attribute -- which way its string is physically run.
+
+    THIS IS WHY THE ARCHES SPLIT. Measured on the 2026 layout:
+
+        Arch 1: Dir=R    Arch 2: Dir=R
+        Arch 3: Dir=L    Arch 4: Dir=L
+
+    Arches 1-2 are wired the opposite way round from 3-4, so an identical
+    `Left-Right` chase TRAVELS one way on the first pair and the other way on
+    the second. Krists: "arches 1 and 2 each have 4 leaps from left to right...
+    arches 3 and 4 have 4 leaps from the right to the left" -- and the same
+    split on every other arch gesture.
+
+    No amount of making the SETTINGS uniform can fix that; the .xsq was already
+    byte-identical across all four. The generator has to invert the direction
+    for the arches whose wiring is reversed, so the row travels one way in the
+    real world.
+    """
+    global _MODEL_DIR
+    if _MODEL_DIR is None:
+        _MODEL_DIR = {}
+        try:
+            _txt = (SHOW_PATH / "xlights_rgbeffects.xml").read_text(errors="ignore")
+            for _m in re.finditer(r'<model [^>]*name="([^"]+)"[^>]*>', _txt):
+                _d = re.search(r'\bDir="([^"]*)"', _m.group(0))
+                if _d:
+                    _MODEL_DIR[_m.group(1)] = _d.group(1)
+        except Exception:
+            pass
+    return _MODEL_DIR.get((name or "").split("/")[0], "")
+
+
+_FLIP_OPPOSITE = {"Left-Right": "Right-Left", "Right-Left": "Left-Right",
+                  "From Middle": "To Middle", "To Middle": "From Middle"}
+
+
+def travel_dir_for(name: str, direction: str, reference: str) -> str:
+    """`direction` as it must be WRITTEN so `name` travels the same way as a
+    model wired `reference`."""
+    _d = model_wiring_dir(name)
+    if not _d or not reference or _d == reference:
+        return direction
+    return _FLIP_OPPOSITE.get(direction, direction)
+
+
+def is_matrix_canvas(name: str) -> bool:
+    _b = (name or "").split("/")[0]
+    _l = _b.lower()
+    if "tunnel" in _l:
+        return False
+    if _b in inactive_models():
+        return False
+    return "matri" in _l or _l == "garage roof"
+
 
 # Big 2D canvases that can carry genuinely complex imagery, not just a wash.
 LARGE_CANVAS = {
@@ -1992,6 +2617,32 @@ OUTLINE_NAME_HINTS = ("vertical", "horizontal", "outline", "spoke", "arm", "peta
 # (arches, C9s, orbs, floods...). Includes the synthetic leftover-prefix
 # names used when no real xLights group covers a family (e.g. "Curtain
 # Garage", once the miswired container of the same name is excluded).
+# Hero props whose whole appeal is submodel detail: they stay OUT of voice
+# duty so the beat, motion and signature passes can all reach them. See the
+# note in assign_voices_to_props().
+VOICE_TOO_INTRICATE = {"Showstopper Spinner"}
+
+# Songs whose pulse is a groove rather than a straight four, where a
+# quarter-note up/down on the spheres rides a grid the music isn't playing:
+# "that song is not in fourth mode but is in groove mode, so the movement
+# doesn't make as much sense... maybe if we slowed the movement down." These
+# get a four-beat cycle (two beats up, two down) and need more bass in a block
+# before a run is committed, so they lean on the left/right and top/bottom
+# split flashing instead. Add a song here when Krists says it feels wrong --
+# see the note in the sphere pass for why this is not detected automatically.
+GROOVE_SONGS = {
+    "The WhatsApp Shakespeare",
+    # Krists's call, and the drums agree it is at least arguable: the Bluey
+    # remix locks 87% of its snare and most of its kick onto the quarter-note
+    # grid, which reads as straight -- but it is a TRAP remix, and the halftime
+    # feel of the genre wants the spheres breathing over four beats rather than
+    # two. "I think it would be better in groove mode."
+    "BLUEY DANCE MODE! (OFFICIAL TRAP REMIX) - ZEESLOW",
+    # Krists's call again: "for the song Ambition, I don't know whether it's in
+    # fourths mode but it should definitely be in groove mode."
+    "The Ambition (Girls Trip)",
+}
+
 MUST_HAVE_GROUPS = {
     "Arches", "C9s", "Orbs", "Floods", "Candy Canes",
     "Curtain Garage", "Curtains All", "Icicles", "Window Matrices",
@@ -2313,7 +2964,19 @@ def build_cast(show_config, positions: dict[str, dict]):
     # which is exactly what breaks symmetry for an ensemble that should
     # always move as a unit.
     for fam_name, fam_members in SYMMETRY_FAMILIES.items():
-        add(fam_name, "group", fam_members, synthetic=True, symmetric=True)
+        # ACTIVE MEMBERS ONLY. This was the one cast path that took its member
+        # list straight from a hardcoded constant instead of going through
+        # valid_member(), so it kept sequencing props after Krists disabled
+        # them. Measured the day he replaced the three front window matrices
+        # with one wide one: each of the three retired matrices was still
+        # carrying 102 effects in Cruise -- more than any matrix that
+        # physically exists -- while `is_active` correctly listed all three as
+        # inactive. A family that loses its members now simply disappears,
+        # which is what should have happened on its own.
+        _live = [m for m in fam_members if valid_member(m)]
+        if len(_live) < 2:
+            continue
+        add(fam_name, "group", _live, synthetic=True, symmetric=True)
 
     # 3. Real xLights groups. Must-have named families claim their members
     # FIRST (regardless of size), so a smaller overlapping group can't starve
@@ -3131,13 +3794,21 @@ def detect_legato_phrase(mp3_stem_dir: Path, sections, min_note_s=0.25, max_note
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     env_times = librosa.times_like(onset_env, sr=sr)
 
+    # A LABEL THAT COVERS MOST OF THE SONG CARRIES NO INFORMATION.
+    # The section detector is good at finding THAT something changed and poor
+    # at naming it: 14 of Aperture's 19 sections come back "chorus", 46 of
+    # Gooey's 57 and 94 of This Version of You's 100 come back "transition".
+    # Taking "the chorus sections" at face value therefore means either most of
+    # the song or an arbitrary five of fifty-seven. So the label is used only
+    # when it actually singles something out -- under half the sections -- and
+    # otherwise the loudest third stands in for "the big moments", which is
+    # what this wanted from the label in the first place.
     chorus_secs = [s for s in sections if s.label == "chorus"]
-    if not chorus_secs:
-        if not sections:
-            return []
-        best_label = max({s.label for s in sections},
-                          key=lambda lbl: max(s.energy_level for s in sections if s.label == lbl))
-        chorus_secs = [s for s in sections if s.label == best_label]
+    if not sections:
+        return []
+    if not chorus_secs or len(chorus_secs) > len(sections) * 0.5:
+        _ranked = sorted(sections, key=lambda s: s.energy_level or 0.0, reverse=True)
+        chorus_secs = _ranked[:max(1, len(sections) // 3)]
 
     notes = []
     for sec in chorus_secs:
@@ -3212,6 +3883,20 @@ def assign_voices_to_props(voices: dict, cast: list[dict],
             # every song." A flood is a stage-lighting tool, not a performer --
             # see flood_pass() for the two things they are actually good at.
             and not t.get("slow")
+            # NOR IS A MANY-SUBMODEL SHOWPIECE. Holding a voice makes a prop
+            # off-limits to every other pass, which is right for a prop that
+            # then carries that voice's rhythm across its whole body -- and
+            # wrong for one whose interest lives in 69 separate submodels.
+            #
+            # Measured in Harmony: the Showstopper Spinner was assigned the
+            # VOCAL and ended up with 510 effects over 70 elements, 198 of
+            # them from the single voice pass and almost nothing from the
+            # beat, anchor, motion or signature passes. The GE Grand Illusion,
+            # which holds no voice, got 1135 over 53 -- 26 effects per element
+            # against the spinner's 7. Hence "the showstopper spinner that's
+            # at the top of the house seems underutilized... let's bring it
+            # more in line with the others."
+            and t["name"] not in VOICE_TOO_INTRICATE
         ]
         if not candidates:
             continue
@@ -3334,6 +4019,55 @@ def main():
     layout = json.loads((SHOW_PATH / ".generation" / "layout.json").read_text())
     positions = {m["name"]: m for m in layout["models"]}
     analysis = SongAnalysis.model_validate_json((GEN_DIR / "analysis.json").read_text())
+    # A hand-read section grid replaces the detector's, before ANY pass sees
+    # it -- boundaries, labels, and an energy level measured from the audio
+    # inside each new section (normalised so the song's loudest section is
+    # 1.0, which is the scale the activity bands below expect).
+    if SONG_NAME in SONG_SECTIONS and analysis.sections:
+        _plan = SONG_SECTIONS[SONG_NAME]
+        _tmpl = analysis.sections[0]
+        _rms = np.asarray(analysis.spectrum.rms_energy, dtype=float)
+        _rt = np.asarray(analysis.spectrum.rms_times, dtype=float)
+        _new = []
+        for _i, (_t0, _lbl) in enumerate(_plan):
+            _t1 = (_plan[_i + 1][0] if _i + 1 < len(_plan)
+                   else float(analysis.duration_seconds))
+            _m = (_rt >= _t0) & (_rt < _t1)
+            _new.append(_tmpl.model_copy(update={
+                "start_time": float(_t0), "end_time": float(_t1),
+                "label": _lbl,
+                "energy_level": float(_rms[_m].mean()) if _m.any() else 0.0}))
+        _peak = max((x.energy_level for x in _new), default=0.0) or 1.0
+        for _x in _new:
+            _x.energy_level = round(_x.energy_level / _peak, 3)
+        analysis.sections = _new
+        print(f"Sections: hand-planned grid, {len(_new)} sections "
+              f"({', '.join(f'{x.label}@{x.start_time:.1f}' for x in _new)})")
+        # ...and written back into analysis.json, because the verification
+        # tools read THAT while the generator reads SONG_SECTIONS. On the first
+        # hand-planned song they disagreed and verify_sections spent a run
+        # grading boundaries that had been deliberately replaced. The
+        # detector's original is kept once, as analysis.detected.json.
+        try:
+            _aj = GEN_DIR / "analysis.json"
+            _raw = json.loads(_aj.read_text())
+            _want = [{"start_time": x.start_time, "end_time": x.end_time,
+                      "label": x.label, "energy_level": x.energy_level}
+                     for x in _new]
+            _have = [{k: r.get(k) for k in ("start_time", "end_time", "label",
+                                            "energy_level")}
+                     for r in _raw.get("sections", [])]
+            if _have != _want:
+                _bak = GEN_DIR / "analysis.detected.json"
+                if not _bak.exists():
+                    _bak.write_text(_aj.read_text())
+                _tmpl = dict(_raw["sections"][0]) if _raw.get("sections") else {}
+                _raw["sections"] = [{**_tmpl, **w} for w in _want]
+                _aj.write_text(json.dumps(_raw))
+                print(f"Sections: written back into analysis.json so the "
+                      f"verify tools see the same grid")
+        except Exception as _e:
+            print(f"  (could not sync sections into analysis.json: {_e})")
     cues = json.loads((GEN_DIR / "cues.json").read_text())
     # Every moment a drop could land on, used by change_marks() to keep a
     # pattern change from happening just BEFORE one.
@@ -3401,8 +4135,10 @@ def main():
         # almost nothing until this existed.
         if key in FLAT_KEYS and "hanging sphere" in (target_name or "").lower():
             key = random.Random(f"sphere|{target_name}|{start_ms}").choice(
-                ["fill_up", "fill_down", "sphere_sparkle", "strand_stripes",
-                 "shockwave", "chase_mid_out", key])
+                ["sphere_bounce", "sphere_bounce", "sphere_up", "sphere_down",
+                 "sphere_bounce2", "sphere_flash", "sphere_flash",
+                 "sphere_pulse", "fill_up", "fill_down", "sphere_scatter",
+                 "sphere_rain", "sphere_rain_up", "sphere_sparkle"])
         # NOTHING BIG FLAT-FLASHES -- enforced HERE, at the one function every
         # placement goes through.
         #
@@ -3861,6 +4597,7 @@ def main():
     # other." They can only agree if they are all reading the same number.
     if beats:
         _bt_arr = np.asarray(beats, dtype=float)
+        _db_arr = np.asarray(downbeats or [], dtype=float)
         _beat_s = beat_ms / 1000.0
         _moved = 0
         for _sec in analysis.sections:
@@ -3885,6 +4622,26 @@ def main():
             _near = [t for t in _cands if abs(t - _sec.start_time) <= _cap]
             _target = (_sec.start_time if _here or not _near else min(_near))
             _snap = float(_bt_arr[int(np.argmin(np.abs(_bt_arr - _target)))])
+            # PREFER A BAR LINE. A section change that lands mid-bar reads as
+            # early or late however precisely it sits on a beat -- measured on
+            # Aperture, 95% of boundaries were within 60ms of a BEAT but only
+            # 25% within 60ms of a DOWNBEAT (median 424ms out). The ear counts
+            # bars, so a look change on beat three of a bar sounds wrong even
+            # though it is exactly on a beat. Where a downbeat is close enough
+            # to still be the same musical moment (within one beat of the beat
+            # we picked), take it instead.
+            # ...but land on a BEAT, not on the downbeat's own timestamp.
+            # The downbeat track is estimated separately from the beat track
+            # and does NOT lie on it: measured on Aperture, 165 downbeats sit a
+            # median 48ms off the nearest beat and one is 7.7 SECONDS out.
+            # Snapping straight to a downbeat time therefore knocked boundaries
+            # off the beat grid -- beat alignment fell from 95% to 75% the
+            # first time I tried it. Use the downbeat only to choose WHICH bar
+            # line, then take the real beat closest to it.
+            if _db_arr.size:
+                _dcand = float(_db_arr[int(np.argmin(np.abs(_db_arr - _snap)))])
+                if abs(_dcand - _snap) <= _beat_s * 1.05:
+                    _snap = float(_bt_arr[int(np.argmin(np.abs(_bt_arr - _dcand)))])
             if abs(_snap - _sec.start_time) > 0.02:
                 _sec.start_time = _snap
                 _moved += 1
@@ -3977,7 +4734,8 @@ def main():
     # by hand and each half given its own measured energy -- then everything
     # downstream reacts to the quieter half on its own terms.
     _split = 0
-    for _sd in _stepdowns:
+    _planned = SONG_NAME in SONG_SECTIONS   # hand-read grid: leave it alone
+    for _sd in ([] if _planned else _stepdowns):
         for _si, _sec in enumerate(analysis.sections):
             if _sec.start_time + 3.0 < _sd < _sec.end_time - 3.0:
                 _tail = type(_sec)(**{**_sec.__dict__})
@@ -4004,12 +4762,26 @@ def main():
     # World Is Mine, with the section path contributing most of it on top of
     # the ambient holds.
     ambient_passages: list[dict] = []
-    try:
-        from ambient_sections import analyse as _amb_analyse
-        ambient_passages = [p for p in _amb_analyse(SONG_NAME)["passages"]
-                            if p["ambient"] and p["dur"] >= 8.0]
-    except Exception as _e:
-        print(f"  (ambient-passage analysis unavailable: {_e})")
+    if SONG_NAME in SONG_AMBIENT:
+        # Hand-set, because the detector judges "ambient" on absolute energy
+        # and a half-energy passage that still has a beat fails that test.
+        # Measured on the Bluey remix: it called 44-74s ambient and cleared
+        # 2705 rhythmic hits there, but bars 28-39 run bass at 0.48-0.81 with
+        # hats throughout -- quieter, not beatless. An empty list means the
+        # song never leaves beat-driven treatment.
+        ambient_passages = [{"t0": float(a), "t1": float(b), "dur": float(b - a),
+                             "ambient": True, "sparse": [], "loud": 0.4}
+                            for a, b in SONG_AMBIENT[SONG_NAME]]
+        print(f"Ambient passages: hand-set, {len(ambient_passages)}"
+              + (f" ({', '.join(f'{a:.0f}-{b:.0f}s' for a, b in SONG_AMBIENT[SONG_NAME])})"
+                 if SONG_AMBIENT[SONG_NAME] else " -- none, the track keeps its beat"))
+    else:
+        try:
+            from ambient_sections import analyse as _amb_analyse
+            ambient_passages = [p for p in _amb_analyse(SONG_NAME)["passages"]
+                                if p["ambient"] and p["dur"] >= 8.0]
+        except Exception as _e:
+            print(f"  (ambient-passage analysis unavailable: {_e})")
 
     def in_ambient(t: float) -> bool:
         return any(a["t0"] <= t < a["t1"] for a in ambient_passages)
@@ -4214,7 +4986,34 @@ def main():
                 # swings in isolation reads as a fault rather than a figure.
                 _sec_beats = [b for b in beats if s_ms / 1000.0 <= b < e_ms / 1000.0]
                 if _on_moment:
-                    _cuts = _sec_beats[:2]
+                    # THE SWING GOES A BAR IN, NOT A BEAT IN.
+                    #
+                    # "Shaders again don't change on the beat on a section
+                    # change, they seem to change a beat late on each section
+                    # change."
+                    #
+                    # He was seeing this split, not the section detection --
+                    # measured, 95% of Aperture's section starts are already
+                    # within 30ms of a beat. The shader DID change on time; it
+                    # then swung from 2.4x speed to 0.35x at `_sec_beats[1]`,
+                    # one beat later, and that speed change is far more visible
+                    # than the shader swap itself. Median shader start after a
+                    # section boundary measured +568ms against a 464ms beat --
+                    # a beat late, exactly as described.
+                    #
+                    # Moving the swing to the first BAR line keeps the "on a
+                    # new section or drop we only do it once and in some
+                    # impactful way" figure, but lands it where the ear expects
+                    # a change instead of one beat after the moment.
+                    # NO SWING AT ALL ON A SECTION OR DROP. The span already
+                    # opens with a new look on the moment; splitting it adds a
+                    # SECOND change shortly after, and that second change is
+                    # the one the eye reads as "the section changed late" --
+                    # it was a 2.4x-to-0.35x speed jump one beat in. Moving it
+                    # to the bar line only moved the complaint. A section gets
+                    # one change, on the boundary: "if it's on a new section or
+                    # drop then we only do it once and in some impactful way."
+                    _cuts = []
                 else:
                     _cuts = _sec_beats[::2][:12]
                     if len(_cuts) < 5:
@@ -4266,6 +5065,25 @@ def main():
                   if section.start_time <= d < section.end_time]
         if not sec_db:
             return []
+        # THE SECTION BOUNDARY IS ITSELF A CHANGE MARK.
+        #
+        # "Shaders again don't change on the beat on a section change, they
+        # seem to change a beat late on each section change... maybe the
+        # section borders are not right on the beat in our detection?"
+        #
+        # The borders are fine -- measured, 95% of Aperture's section starts
+        # sit within 30ms of a beat, and 95% of shader starts are on a beat
+        # too. The offset comes from HERE: this only ever took downbeats, so
+        # the first change of a section landed on the first BAR line at or
+        # after the boundary. A section that begins one, two or three beats
+        # before a downbeat therefore changed that many beats late, every
+        # time. Measured across Aperture: shader starts within 2s of a section
+        # boundary sat a median of +568ms after it, against a 464ms beat.
+        #
+        # Adding the boundary itself puts the change on the moment; the bar
+        # grid then carries on from the next downbeat as before.
+        if sec_db[0] - section.start_time > 0.08:
+            sec_db = [section.start_time] + sec_db
         half_bar = bar_s / 2.0
         harmonic = [d for d in sec_db
                     if any(abs(d - c) <= half_bar for c in chord_changes)]
@@ -4470,6 +5288,12 @@ def main():
     bar_s = (beat_ms / 1000.0) * 4.0
     min_section_s = bar_s * 2.0
     merged_sections = []
+    # A hand-planned grid keeps its 2-bar builds and breaks: they sit exactly
+    # at the minimum, so float noise alone decided whether they survived
+    # (measured: the 48.37-52.08s break, 3.7151s against a 3.7152s minimum,
+    # was absorbed into the chorus before it).
+    if SONG_NAME in SONG_SECTIONS:
+        min_section_s = 0.0
     for sec in analysis.sections:
         if merged_sections and (merged_sections[-1].end_time
                                 - merged_sections[-1].start_time) < min_section_s:
@@ -4544,8 +5368,18 @@ def main():
     label_seen: Counter = Counter()
     section_meta = []
     for s in analysis.sections:
-        label_seen[s.label] += 1
-        section_meta.append({"instance": label_seen[s.label]})
+        # "THE NTH TIME WE ARE HERE", BY ENERGY, NOT BY LABEL.
+        # `instance` drives `escalation` ("later repeats get bolder", capped at
+        # 3). Counting repeats of the LABEL makes that meaningless the moment
+        # the detector reuses one name: This Version of You has 94 sections
+        # called "transition", so escalation hit its maximum at the third
+        # section and stayed pinned there for the rest of the song -- the
+        # opposite of a build. Bucketing the measured energy to one decimal
+        # keeps the intent (a passage of this weight, come round again, goes
+        # further) and survives a useless label.
+        _bucket = round(float(s.energy_level or 0.0), 1)
+        label_seen[_bucket] += 1
+        section_meta.append({"instance": label_seen[_bucket]})
 
     # This song's fixed palette family -- see PALETTE_FAMILY_SIZE above.
     fam_rng = random.Random(f"{SONG_NAME}|palette-family")
@@ -4571,8 +5405,18 @@ def main():
     # highest-energy section if no implosion was detected at all.
     climax_sections: set[int] = set()
     top_drop_time: float | None = None
+    if SONG_NAME in SONG_CLIMAX:
+        # Named by hand: these sections ARE the peak, whatever the loudness
+        # ranking says, and the drop that opens the first of them is the
+        # climax drop.
+        for _ct in SONG_CLIMAX[SONG_NAME]:
+            for _si, _s in enumerate(analysis.sections):
+                if _s.start_time <= _ct < _s.end_time:
+                    climax_sections.add(_si)
+                    break
+        top_drop_time = float(SONG_CLIMAX[SONG_NAME][0])
     cutouts_all = cues.get("predrop_cutouts", [])
-    if cutouts_all:
+    if cutouts_all and SONG_NAME not in SONG_CLIMAX:
         top_drop_time = max(cutouts_all, key=lambda ev: ev.get("drop_energy", 0))["drop_time"]
         for si, s in enumerate(analysis.sections):
             if s.start_time <= top_drop_time < s.end_time:
@@ -4747,7 +5591,14 @@ def main():
             if _v in voices:
                 _drum = max(_drum, voices[_v].density_in(
                     section.start_time, section.end_time))
-        if _drum >= 0.7 and _leap_rng.random() < 0.55:
+        # 0.85, not 0.55. The drum gate is right and stays -- a leap marks the
+        # beat so it needs a beat to mark -- but the coin flip on top of it
+        # left the arches doing something else in nearly half the sections
+        # that could carry the gesture. Measured on Aperture: the 2:03 chorus
+        # had 676 leaps in the song and none of them there, so the arches spent
+        # it on left-pair/right-pair flashing instead. Leaping is the arches'
+        # main device; it should be the default wherever there are drums.
+        if _drum >= 0.7 and _leap_rng.random() < 0.85:
             leap_sections.add(si)
 
     # ENSEMBLE MODE per section: the outlines/verticals/C9s either MOVE or
@@ -5173,7 +6024,16 @@ def main():
         # complaint; even on a good palette it's monotonous. Cycling is now
         # through `song_palette_cycle` (this song's fixed subset), not the
         # full PAL_CYCLE, for cohesion -- see PALETTE_FAMILY_SIZE above.
-        if si in climax_sections:
+        # The pin whose planned span contains this section's start.
+        _pins = SONG_SECTION_LOOK.get(SONG_NAME) or {}
+        _pin = {}
+        if _pins:
+            _cands = [t for t in sorted(_pins) if t <= section.start_time + 0.25]
+            if _cands:
+                _pin = _pins[_cands[-1]]
+        if _pin.get("palette"):
+            pal_name = cycle_name = _pin["palette"]
+        elif si in climax_sections:
             # The song's real climax overrides the rotation entirely with a
             # dedicated high-contrast palette -- direct feedback: "identify
             # the big climaxes... where we can introduce more contrast."
@@ -5202,8 +6062,17 @@ def main():
             # up there is a ValueError. Its accent stays the colour the
             # section would otherwise have had, which keeps the mono passage
             # tied to the songs's palette family instead of floating free.
-            accent_idx = (song_palette_cycle.index(cycle_name) + 1) % len(song_palette_cycle)
+            # A pinned palette need not be in the song's rotation, so fall
+            # back to the rotation's first entry for the accent rather than
+            # raising a ValueError on .index().
+            accent_idx = ((song_palette_cycle.index(cycle_name) + 1)
+                          if cycle_name in song_palette_cycle else 1
+                          ) % len(song_palette_cycle)
             accent_pal = PALETTES[song_palette_cycle[accent_idx]]
+        # Kept on the section so later passes can reach it -- the arch leap
+        # uses it to change colour every fourth bar. Without this the lookup
+        # returned None and that variation silently did nothing.
+        section_meta[si]["accent"] = accent_pal
         # One shader/pattern choice for every large canvas active THIS
         # section, instead of each rolling its own -- direct feedback:
         # "we could share shaders across matrices... more cohesive
@@ -5253,7 +6122,9 @@ def main():
         # arrive via a single canvas's own roll rather than the shared slot.
         _pd = [k for k in _pool if k in PALETTE_DRIVEN_SHADERS
                and not is_centred(k)]
-        if _pd:
+        if _pin.get("shader"):
+            shared_large_key = _pin["shader"]
+        elif _pd:
             shared_large_key = rng.choice(_pd)
         else:
             _npd = [k for k in _pool if not k.startswith("shader_")]
@@ -5999,6 +6870,27 @@ def main():
                                                 if t0 + 4 < e < t1 - 4})
                 else:
                     _marks = marks_a
+                # A SECTION BOUNDARY INSIDE THE PASSAGE IS A CHANGE MARK.
+                #
+                # Residual half of "shaders change late on a section change".
+                # The change_marks() fix covered the beat-driven part of the
+                # song; this pass owns the ambient passages and built its marks
+                # only from the passage bounds and isolated drum hits, so a
+                # section starting inside a passage changed at the next
+                # isolated hit instead -- measured on This Version of You and
+                # Gooey at 0.9 and 1.9 beats after the boundary, and this call
+                # site was 15 of TVOY's 20 late changes and 5 of Gooey's 10.
+                # Ambient passages still follow shape rather than beat; they
+                # just stop ignoring the one structural moment they contain.
+                # Kept 2s clear of the passage edges so a boundary sitting
+                # almost on top of one cannot produce a sub-second ambient
+                # hold. Tried 0.8s to catch Gooey's last two late boundaries
+                # (26.2s and 147.6s): it changed nothing, so those two are not
+                # ambient-edge cases and the tighter margin was pure churn.
+                _marks = sorted(set(_marks) | {
+                    _sc.start_time for _sc in analysis.sections
+                    if _marks and _marks[0] + 2.0 < _sc.start_time
+                    < _marks[-1] - 2.0})
                 for mi in range(len(_marks) - 1):
                     a_ms, b_ms = int(_marks[mi] * 1000), int(_marks[mi + 1] * 1000)
                     # Each chord takes the next colour of the family, so the
@@ -6345,13 +7237,35 @@ def main():
             # just flash. Up/down fills, sparkle, a ring from the middle, and
             # the alternating-strand stripes, so the seven read as objects
             # doing something rather than seven lamps switching.
-            return _r.choice(["fill_up", "fill_down", "sphere_sparkle",
-                              "shockwave", "strand_stripes", "ripple_hex_in",
-                              "chase_mid_out", "on_pop"])
+            # Weighted towards the two things he asked for by name: travel
+            # up and down the strings, and flash/fade. The textures stay in
+            # for variety but are no longer the bulk of it.
+            return _r.choice(["sphere_bounce", "sphere_bounce", "sphere_up",
+                              "sphere_down", "sphere_bounce2", "sphere_flash",
+                              "sphere_flash", "sphere_pulse", "fill_up",
+                              "fill_down", "sphere_scatter", "sphere_rain",
+                              "sphere_rain_up", "sphere_sparkle"])
         if any(h in _nm for h in ("mini tree", "tree")):
             # Cone-shaped: travel along it, or shut it like a curtain.
             return _r.choice(["chase_mid_out", "chase_bounce_drift",
                               "curtain_mid", "shockwave", "on_pop"])
+        if "spinner" in _nm:
+            # A SPINNER IS A ROTATING PROP, so it gets travel and rotation
+            # rather than the flakes' burst-from-the-middle. Measured on the
+            # Showstopper Spinner in Harmony: 260 of its 510 effects were
+            # Shockwave -- one gesture, over and over, on the prop at the top
+            # of the house. "The showstopper spinner seems underutilized, I
+            # don't see as many effects or as many submodels being used or as
+            # much movement or rhythm on that one."
+            #
+            # Kept separate from the flake pool below on purpose: "I like what
+            # we're doing with the EFL flakes and rosa grande and baby grand
+            # illusion", so those are untouched.
+            return _r.choice(["pinwheel", "pinwheel_4", "pinwheel_twist",
+                              "pinwheel_6_slow", "chase_mid_out",
+                              "chase_mid_in", "chase_lr", "chase_rl",
+                              "ripple_rays", "ripple_hex_out", "shockwave",
+                              "on_pop"])
         if any(h in _nm for h in ("flake", "snowflake", "showstopper",
                                   "spinner", "sphere", "star", "wreath")):
             # Radial by construction: a ring or polygon expanding from the
@@ -6572,7 +7486,15 @@ def main():
                         # flashing whole: left half on 1 and 3, right on 2 and 4.
                         side = anti[1][bi % 2]
                         for m in side:
-                            add(m, L_PULSE, "on_pop", t_ms, t_ms + dur, pal)
+                            # TAGGED so nothing downstream can treat one side
+                            # differently from the other. The two sides answer
+                            # each other on alternate beats, so any rule keyed
+                            # to "is this a strong beat" splits the pair in
+                            # half -- which is exactly what happened: the right
+                            # side kept its flat flash and the left side was
+                            # converted to a 0.2s chase nobody could see.
+                            add(m, L_PULSE, "on_pop", t_ms, t_ms + dur, pal,
+                                {"X_AntiPhase": "1"})
                         n_anchor += 1
                         continue
                     add_target(_a, L_PULSE, beat_hit_key(_a), t_ms, t_ms + dur, pal)
@@ -6608,9 +7530,23 @@ def main():
                 # exactly: "maybe you're counting beats as bars?" Deriving from
                 # elapsed time makes four bars mean four bars on every song.
                 rot = int((bt - section.start_time) / max(bar_s * 4.0, 1e-6))
-                extras = [accent_pool[(rot + k * len(accent_pool) // max(1, width))
-                                      % len(accent_pool)]
-                          for k in range(min(width, len(accent_pool)))]
+                # A STABLE SET, then a variable COUNT from it. The stride
+                # used to be `len(pool) // width`, and `width` gains +2 on a
+                # downbeat -- so the stride changed between the downbeat and
+                # the beats around it and the whole set of props changed with
+                # it. "The rhythm jumps around a lot, going to a different prop
+                # each beat oftentimes, but I'd like a little more consistency
+                # so the eye knows where to look."
+                #
+                # Now the four-bar window picks ONE ordered set on a fixed
+                # stride, and a busier beat simply takes more of that same set
+                # instead of a different one. The eye keeps its anchor and the
+                # downbeat adds to it rather than replacing it.
+                _WMAX = 7
+                _stride = max(1, len(accent_pool) // _WMAX)
+                _core = [accent_pool[(rot * _WMAX + k * _stride) % len(accent_pool)]
+                         for k in range(min(_WMAX, len(accent_pool)))]
+                extras = _core[:min(width, len(_core))]
                 for tgt in extras:
                     # Skip anything already carrying a beat this section --
                     # including via group membership, which is how the Arches
@@ -6781,7 +7717,7 @@ def main():
             # there-and-back cycle simultaneously:
             #   "sweep"  one chase over all four arches (the original)
             #   "pairs"  two chases, each over half the arches
-            #   "solo"   one chase per arch, all bouncing at once
+            #   "all"    every arch leaps on every beat, together
             # Playing each endpoint twice keeps the turn where the eye expects
             # it, exactly as the single sweep already does.
             def _cycle(idxs):
@@ -6791,9 +7727,14 @@ def main():
             leap_modes = {
                 "sweep": [_cycle(range(n_a))],
                 "pairs": [_cycle(range(0, half)), _cycle(range(half, n_a))],
-                "solo": [_cycle([i]) for i in range(n_a)],
+                # "all": every arch leaps on every beat, together and in the
+                # same direction -- "they should either all 4 leap at the same
+                # time, or have one leap across each arch one by one... then
+                # bounce back the other way, or have multiple arches bouncing."
+                # Those three readings are exactly sweep / pairs / all.
+                "all": [_cycle([i]) for i in range(n_a)],
             }
-            _mode_names = ["sweep", "pairs", "solo"]
+            _mode_names = ["sweep", "pairs", "all"]
             _leap_mode_offset = random.Random(f"{SONG_NAME}|leapmode").randrange(3)
             cycle = list(range(n_a)) + list(range(n_a - 1, -1, -1))
             for si, section in enumerate(analysis.sections):
@@ -6833,13 +7774,52 @@ def main():
                     # consecutive arches fire in sequence the whole run reads
                     # as one leap moving across the house. Alternating
                     # direction on the turn-around keeps it leaping back.
-                    # Direction is per GROUP now: each simultaneous chase
-                    # turns around at its own end, so in "solo" mode all four
-                    # arches bounce independently rather than sharing the
-                    # single sweep's turn.
-                    fwd = (bi % len(_g)) < max(1, len(_g) // 2)
-                    add(m, L_PULSE, "chase_lr" if fwd else "chase_rl",
-                        t_ms, t_ms + hold, pal)
+                    # ONE DIRECTION FOR THE WHOLE ROW AT ANY MOMENT.
+                    # This used to be computed from each GROUP's own index
+                    # (`bi % len(_g)`), so in "pairs" mode the two groups
+                    # fell out of phase with each other and the row showed
+                    # L-R, L-R, L-R, R-L, R-L, R-L, R-L, L-R -- Krists:
+                    # "they are leaping one arch at a time, but in random
+                    # directions."  Direction is a property of the SWEEP,
+                    # not of a group: everything travels one way across the
+                    # row, then everything bounces back.
+                    # ALTERNATE EVERY BEAT -- a hand waving, not a queue.
+                    # "They are only leaping one direction multiple times
+                    # and then the other direction multiple times. That's
+                    # not the effect I'm looking for, I want one leap
+                    # right, one leap left, one leap right, one leap to the
+                    # left, so it looks like hands waving. Otherwise it
+                    # looks like a new dot jumping out of nowhere every
+                    # beat and disappearing. Leaping back and forth makes
+                    # it look like it's the same dot dancing back and
+                    # forth."
+                    #
+                    # Flipping every n_a beats (a full pass across the row)
+                    # is what produced four leaps one way then four the
+                    # other. The eye reads a REVERSAL as the same dot
+                    # returning; it reads a repeat as a new dot each time.
+                    fwd = (bi % 2 == 0)
+                    # `arch_leap_vps`, NOT `chase_lr`. Same gesture, right
+                    # buffer: each arch is LayerSizes=100,100,100 -- three
+                    # concentric rows -- and `chase_lr`'s Per Preview buffer
+                    # runs the length of row 1, then row 2, then row 3, which
+                    # is what Krists kept seeing ("each row chasing very very
+                    # very fast, one after another", and the "inner ring,
+                    # middle ring, outer ring" movement). Per Model Vertical
+                    # Per Strand gives each row its own line and travels along
+                    # all three together, so one bar crosses the arch.
+                    # COMPENSATE FOR THE WIRING. Arches 1-2 are Dir=R and
+                    # 3-4 are Dir=L, so the same key travels opposite ways
+                    # on the two pairs. `travel_dir_for` flips the ones
+                    # wired backwards relative to the first arch, so the
+                    # whole row moves together in the real world.
+                    _want = "Left-Right" if fwd else "Right-Left"
+                    _ref = model_wiring_dir(arch_order[0])
+                    _real = travel_dir_for(m, _want, _ref)
+                    add(m, L_PULSE,
+                        "arch_leap_vps" if _real == "Left-Right" else "arch_leap_vps_r",
+                        t_ms, t_ms + hold, pal,
+                        {"X_ArchLeap": "1", "X_ArchOwner": "1"})
                     n_leap += 1
     print(f"Leaping arches: {n_leap} steps ({len(_mode_names)} modes rotating)")
 
@@ -7706,6 +8686,43 @@ def main():
         print(f"  snapped {_snapped} drop times onto the drum hit they mark")
 
     cutouts = (_drops + _rest)[:6]
+    if SONG_NAME in SONG_DROPS:
+        # The moments to stage, read off the energy map by hand. The detector
+        # finds plenty of candidates and ranks them by local band energy,
+        # which is not the same as "this is the moment the song is built
+        # around" -- measured on the Bluey remix it staged 20, 34, 43, 75, 86
+        # and 103s, missing the actual climax at 89.2s by 3.2s and spending a
+        # stage on 43s, which is mid-chorus. A detected cutout within half a
+        # beat of a named time keeps its real hush; anything else gets a short
+        # synthetic one, and drop_energy is ranked so the LAST named time is
+        # the climax unless the list says otherwise.
+        _named = sorted(SONG_DROPS[SONG_NAME])
+        _keep = []
+        for _i, _t in enumerate(_named):
+            _t = _snap_drop(float(_t))
+            _match = next((c for c in cutouts
+                           if abs(c["drop_time"] - _t) <= beat_ms / 2000.0), None)
+            if _match:
+                _match["drop_time"] = _t
+                _keep.append(_match)
+            else:
+                # A REAL HUSH, about a beat of it. dark_start below is
+                # max(cutout_end, cutout_start + 260ms), so a window ending
+                # 80ms before the drop gave only 80ms of black and
+                # verify_drops reported "no hush" on every staged drop. Ending
+                # it 450ms out gives roughly one beat of darkness for the drop
+                # to land against.
+                _keep.append({"cutout_start": _t - 1.20, "cutout_end": _t - 0.45,
+                              "drop_time": _t, "drop_energy": 0.5})
+        # Rank so the strongest named drop wins the climax staging.
+        _rm = np.asarray(analysis.spectrum.rms_energy, dtype=float)
+        _rtm = np.asarray(analysis.spectrum.rms_times, dtype=float)
+        for _c in _keep:
+            _m = (_rtm >= _c["drop_time"]) & (_rtm < _c["drop_time"] + 2.0)
+            _c["drop_energy"] = float(_rm[_m].mean()) if _m.any() else 0.0
+        cutouts = _keep
+        print(f"Drops: hand-set, {len(cutouts)} staged at "
+              + ", ".join(f"{c['drop_time']:.2f}s" for c in cutouts))
     cutouts.sort(key=lambda ev: ev["cutout_start"])
     blackout_windows = []
     ci_drop = 0
@@ -7876,7 +8893,7 @@ def main():
                 _black_end = (int(_stage1 * 1000) if _stage1 is not None
                               else drop)
                 add_target(t, L_SIG, "off", dark_start, _black_end,
-                           PALETTES["white"])
+                           PALETTES["white"], {"X_Blackout": "1"})
             elif t["cat"] in ("single_line", "icicle") or "/" in t["name"]:
                 # Softened pre-drop: outlines only. "Maybe it doesn't always
                 # need to go completely dark, it could just go down to
@@ -7886,9 +8903,10 @@ def main():
                 # the shape of the house stays readable through the gap while
                 # the contrast into the drop is nearly all still there.
                 add_target(t, L_SIG, "twinkle_soft", dark_start, drop,
-                           PALETTES["white"])
+                           PALETTES["white"], {"X_Blackout": "1"})
             else:
-                add_target(t, L_SIG, "off", dark_start, drop, PALETTES["white"])
+                add_target(t, L_SIG, "off", dark_start, drop,
+                           PALETTES["white"], {"X_Blackout": "1"})
             # White for the instant of impact (maximum contrast against the
             # blackout that precedes it), then a warm gold pattern. Both were
             # `ember` when ember led with #FF2A00, which meant every drop in
@@ -8375,6 +9393,13 @@ def main():
     # melodic phrase draws the same shape on the house every time.
     n_melody = 0
     _mel_played: list[str] = []
+    # WHERE A MELODY IS PLAYING, AND ON WHAT. Filled by the melody pass, read
+    # by _g_melody_solo. The notes were landing on the right prop by pitch all
+    # along -- measured deg 3 -> sphere 2, deg 4 -> sphere 3 -- and were still
+    # invisible, because the background bed held 46 of the spheres' 56 strands
+    # lit at any beat. A single note at brightness 90-170 on top of that reads
+    # as nothing: "I haven't seen them show any melodies yet."
+    _mel_windows: list[dict] = []
     if melody_notes:
         mel_candidates = [
             t for t in cast
@@ -8452,7 +9477,10 @@ def main():
             _played: set[str] = set()
             for _i, note in enumerate(melody_notes):
                 s_ms = int(note["start"] * 1000)
-                e_ms = max(s_ms + 160, int(note["end"] * 1000))
+                # 260ms floor, not 160. A note has to be visible for long
+                # enough to be located on the house before it goes again, and
+                # the sliver guard drops anything under 120ms outright.
+                e_ms = max(s_ms + 260, int(note["end"] * 1000))
                 for _t in _players(_phrase_of[_i]):
                     _mem = _members_of(_t)
                     if not _mem:
@@ -8463,10 +9491,31 @@ def main():
                     # light moves right" as the readable gesture.
                     _idx = int(note["degree"] * len(_mem) / max(1, n_deg))
                     _idx = max(0, min(len(_mem) - 1, _idx))
-                    add(_mem[_idx], L_SIG, "on_swell", s_ms, e_ms,
-                        PALETTES["gold"])
+                    # THE FADES SCALE TO THE NOTE. melody_note carries a
+                    # 0.35s fade-out, which is right for a held note and wrong
+                    # for a quick one: measured on a 0.16s note, the effect was
+                    # already fading before it arrived and peaked at 44 out of
+                    # a possible 157 for gold. The note has to hit full
+                    # brightness first and decay after.
+                    _dur = (e_ms - s_ms) / 1000.0
+                    add(_mem[_idx], L_SIG, "melody_note", s_ms, e_ms,
+                        PALETTES["gold"],
+                        {"T_TEXTCTRL_Fadein": f"{min(0.05, _dur * 0.12):.2f}",
+                         "T_TEXTCTRL_Fadeout": f"{min(0.35, _dur * 0.40):.2f}"})
                     _played.add(_t["name"])
                     n_melody += 1
+                    # The GROUP name goes in alongside the members. A
+                    # placement made on "Hanging Spheres" carries the group as
+                    # its model_name and expands to all seven at render time,
+                    # so a guard that matches member names only clears nothing
+                    # that matters -- measured: the first version of this
+                    # cleared 127 effects and left the other six spheres at
+                    # level 71 through the phrase. Same shape of mistake as
+                    # the sphere effect pool, which the group path also
+                    # bypassed.
+                    _mel_windows.append({"ph": _phrase_of[_i],
+                                         "members": tuple(_mem) + (_t["name"],),
+                                         "start": s_ms, "end": e_ms})
             if melody_notes:
                 log(melody_notes[0]["start"], "melody",
                     f"{len(melody_notes)} notes over {n_deg} pitches across "
@@ -8475,6 +9524,388 @@ def main():
                 _mel_played = sorted(_played)
     print(f"Melody notes mapped: {n_melody}"
           + (f" -> {', '.join(_mel_played)}" if n_melody and _mel_played else ""))
+
+    # --- 2g-bis. HANGING SPHERES: their own beat ---------------------------
+    #
+    # "Not sure what voices the spheres are carrying but they seem somewhat
+    # chaotic." Measured: NONE. The instrument-voice assignment handed kick,
+    # snare, bass, chord and vocal to Mini Trees, Sphere-2, C9s,
+    # Sphere-3 Inner and the Showstopper Spinner -- the "Sphere-*" props are
+    # the older sphere models, not these. So the seven hanging spheres were
+    # reached only by group flashes and bed fills, which is exactly what
+    # "chaotic and not on the beat" looks like: light with no rhythm behind
+    # it.
+    #
+    # This gives them a voice of their own, on the beat, and uses the SET as
+    # an instrument: "you could split the spheres randomly into left/right or
+    # top/bottom and use them for rhythms that way too."
+    #
+    #   left/right  by x  -- 902..1254 across the house
+    #   top/bottom  by y  -- they hang at alternating heights (2/4/6 at
+    #                        297-336, 1/3/5/7 at 221-232), so this split is a
+    #                        zig-zag rather than a block, and reads as a
+    #                        different shape from the left/right one
+    #
+    # The half alternates hit to hit, so a steady kick becomes a call and
+    # response across the house instead of seven lamps blinking together.
+    n_sphere_rhythm = 0
+    # Each hit: when, and WHICH spheres are supposed to be lit. Read by
+    # _g_spheres_rhythmic, which clears everything else off the spheres for
+    # the length of the hit. Without that the bed fires on the same beats and
+    # lights the other half anyway -- measured 6.0 of 7 spheres lit on every
+    # hit, so the left/right and top/bottom split was invisible, and the
+    # up/down chase was averaged into a static wash.
+    _sph_hits: list[dict] = []
+    _sph_runs: list[dict] = []
+    _sph_looks: list[dict] = []
+    _sph_all = sorted((m for m in positions
+                       if "hanging sphere" in m.lower()),
+                      key=lambda m: positions[m].get("x", 0))
+    if len(_sph_all) >= 4:
+        _xs = sorted(positions[m].get("x", 0) for m in _sph_all)
+        _ys = sorted(positions[m].get("y", 0) for m in _sph_all)
+        _xmid = _xs[len(_xs) // 2]
+        _ymid = _ys[len(_ys) // 2]
+        _splits = {
+            "left/right": ([m for m in _sph_all if positions[m].get("x", 0) < _xmid],
+                           [m for m in _sph_all if positions[m].get("x", 0) >= _xmid]),
+            "top/bottom": ([m for m in _sph_all if positions[m].get("y", 0) >= _ymid],
+                           [m for m in _sph_all if positions[m].get("y", 0) < _ymid]),
+        }
+        # The driving voice: bass or kick only. Standing rule -- "I thought we
+        # had really limited the rhythms to mostly kick and bass quarter/half
+        # notes." Never the hats or a vocal, which is what made other props
+        # frantic in earlier rounds.
+        _drv_name = None
+        for _cand in ("bass", "kick"):
+            _v = voices.get(_cand)
+            if _v is not None and len(_v) >= 16:
+                _drv_name = _cand
+                break
+        _drv = voices.get(_drv_name) if _drv_name else None
+        if _drv is not None and beats:
+            _bt = list(beats)
+
+            def _snap(t):
+                """Nearest beat -- the spheres land ON the grid or not at all."""
+                _i = min(range(len(_bt)), key=lambda i: abs(_bt[i] - t))
+                return _bt[_i] if abs(_bt[_i] - t) <= 0.12 else None
+
+            # One hit per beat at most, and never inside an ambient passage
+            # (those have their own slow vocabulary).
+            _seen = set()
+            _hits = []
+            for _t in sorted(_drv.onsets):
+                if in_ambient(_t):
+                    continue
+                _b = _snap(_t)
+                if _b is None or _b in _seen:
+                    continue
+                _seen.add(_b)
+                _hits.append(_b)
+
+            _SPH_PALS = ("gold", "ice", "violet", "ember", "glacier", "candy")
+            _rng = random.Random(f"{SONG_NAME}|sphere-rhythm")
+
+            # ---- SUSTAINED UP/DOWN RUNS, two bars at a time ---------------
+            #
+            # "It should be slow like the corner verticals. In Aperture the
+            # corner verticals do a slow up down every quarter or half note...
+            # an up every quarter note, then a down during the next quarter
+            # note, and it repeats for at least a couple of bars so it doesn't
+            # seem random."
+            #
+            # Measured on his Corner Verticals in Aperture: `Bounce from Left`
+            # at rotations=1.0 over a median span of 900ms -- one complete
+            # up-and-down per TWO beats. The per-hit bounce this pass placed
+            # before did the same round trip inside ONE beat and then stopped,
+            # which is both four times too fast and one-off.
+            #
+            # A bounce's rotations are span-normalised, so a run of N beats
+            # with rotations = N/2 holds that same 2-beat cycle for the whole
+            # run: measured over 8 beats at rotations=4, the band sat at the
+            # bottom on beats 0, 2, 4, 6 and at the top on 1, 3, 5, 7. One
+            # effect, four repetitions, locked to the bar.
+            # GROOVE FEEL, unchanged: a song in groove mode cycles up/down
+            # over four beats instead of two (Shakespeare -- "the up/down
+            # movement is a bit awkward because that song is not in fourth
+            # mode but is in groove mode"). Named, not auto-detected: kick grid
+            # lock measured 0.46 for Shakespeare and 0.48 for Aperture.
+            _kv = voices.get("kick")
+            _raw = [t for t in (_kv.onsets if _kv is not None else [])
+                    if not in_ambient(t)]
+            _lock = 1.0
+            if len(_raw) >= 16 and len(_bt) > 4:
+                _bar = np.asarray(_bt)
+                _lock = float(np.mean([
+                    np.min(np.abs(_bar - t)) < 0.08 for t in _raw]))
+            _groove = SONG_NAME in GROOVE_SONGS
+            _cycle_beats = 4.0 if _groove else 2.0
+            _min_hits = 5 if _groove else 3
+            print(f"Sphere feel: grid lock {_lock:.2f} -> "
+                  f"{'GROOVE (slow 4-beat cycle)' if _groove else 'straight (2-beat cycle)'}"
+                  f" [grid lock is diagnostic only, {len(_raw)} kick onsets]")
+
+            # ==== LOOKS: one idea held for bars, not a new effect per hit ======
+            #
+            # "The hanging spheres are still used in only a few simple ways...
+            # as a whole group or part of the house, some side to side movement,
+            # and some up down movement. Can we incorporate more creative
+            # approaches and more variety? Flashing, glittering, changing color
+            # on the beat, using different colors for each strand... Also the
+            # effects on the spheres seem to change too frequently, they only
+            # do a single effect for a couple of beats."
+            #
+            # The previous pass picked a fresh effect on EVERY bass hit, so the
+            # spheres never held an idea longer than a beat or two, and its
+            # vocabulary was flash / pulse / bounce / one-way chase. Now the
+            # song is walked in LOOKS -- each one a single beat-locked idea held
+            # for two bars (rhythmic looks) or four (textures), chosen by the
+            # section's energy, never the same as either of the two before it,
+            # and cut to change ON a section boundary rather than across it.
+            #
+            # Every primitive was measured in isolation on BOTH sphere wirings
+            # (10 strands x 19 and 8 x 30) before being used:
+            #   updown        bounce run on one half, other half flashes on bass
+            #   flash_halves  left/right or top/bottom halves alternate each beat
+            #   colour_beat   all seven cut to a new colour on every beat
+            #                 (gold 50, ice 191, violet 272, green 135 deg)
+            #   chase_across  one sphere per beat, travelling across and back
+            #   fill_pump     fill up over one beat, down over the next (0->92->0)
+            #   stripes_spin  each strand its own colour, blocks rotating once a bar
+            #   stripes_alt   strand-by-strand alternating colours, re-coloured
+            #                 on every bar
+            #   glitter_hits  glitter over every strand, halves flash on bass
+            #   rain          meteors falling down every strand
+            _hitset = set(_hits)
+            _secs = list(analysis.sections)
+            _elv = [float(getattr(_s, "energy_level", 0.0) or 0.0) for _s in _secs]
+            _elo = min(_elv) if _elv else 0.0
+            _ehi = max(_elv) if _elv else 1.0
+
+            def _energy(t):
+                for _s, _ev in zip(_secs, _elv):
+                    if _s.start_time <= t < _s.end_time:
+                        return (_ev - _elo) / max(1e-6, _ehi - _elo)
+                return 0.5
+
+            def _next_boundary(t):
+                return min((_s.start_time for _s in _secs
+                            if _s.start_time > t + 0.05), default=1e9)
+
+            try:
+                _fd = final_dropout
+            except NameError:
+                _fd = None
+
+            # name: (beats held, needs a working bass line)
+            _LOOKS = {
+                "updown": (8, True), "flash_halves": (8, True),
+                "colour_beat": (8, True), "chase_across": (8, True),
+                "fill_pump": (8, True), "stripes_spin": (16, False),
+                "stripes_alt": (16, False), "glitter_hits": (16, False),
+                "rain": (16, False),
+            }
+            # SPARKLE IS A HIGH-ENERGY SPICE, NOT THE DEFAULT. "They do the
+            # sparkle glitter effect too often... the sparkle is good for high
+            # energy moments but it's too much to use it so often. They should
+            # do more color changes and flashes and movement."
+            #
+            # Measured on Bluey before this: 17 of 19 looks were textures
+            # (stripes 9, glitter 4, rain 4) and only 2 were active, because
+            # glitter and rain sat in every tier including the quiet one. Now
+            # glitter appears only in the top tier, rain only in the bottom,
+            # and the active looks are weighted by repetition so colour
+            # changes, flashes and travel are what the spheres mostly do.
+            _POOL_HI = ("colour_beat", "colour_beat", "flash_halves",
+                        "flash_halves", "chase_across", "chase_across",
+                        "updown", "fill_pump", "stripes_spin", "glitter_hits")
+            _POOL_MID = ("colour_beat", "flash_halves", "flash_halves",
+                         "chase_across", "updown", "fill_pump",
+                         "stripes_spin", "stripes_alt")
+            _POOL_LO = ("flash_halves", "colour_beat", "stripes_alt",
+                        "stripes_spin", "rain")
+            _COLOUR_SEQ = ("gold", "ice", "violet", "xmas", "candy", "ember")
+            _STRIPE_PALS = ("candy", "xmas", "neon", "regal", "violet", "ice")
+            _cnt = [0]
+            _MIN_LOOK = 4                       # beats; nothing shorter is placed
+
+            def _p(key, m, a_ms, b_ms, pal, tag, layer=L_BASE, extra=None):
+                if b_ms - a_ms < 150:
+                    return
+                add(m, layer, key, int(a_ms), int(b_ms), pal,
+                    {"X_Sphere": tag, **(extra or {})})
+                _cnt[0] += 1
+
+            def _place(look, B, pal, li):
+                """B: the beat times bounding the look (beats + 1 of them).
+
+                Layers: xLights renders layer 0 on TOP. Accents sit on L_BASE,
+                a texture under them on L_MOTION, and an opaque Off beneath on
+                L_PULSE -- a moving effect's dark pixels are transparent, and
+                without the Off a house-wide shader shows straight through.
+                Sustained pieces are tagged "run" (exempt from the one-beat
+                cap); beat-length flashes "1". Gapless colour and fill segments
+                are tagged "run" too, because trimming a beat-long segment to
+                the MEDIAN beat would leave a dark sliver at every change."""
+                nb = len(B) - 1
+                a_ms, b_ms = int(B[0] * 1000), int(B[-1] * 1000)
+
+                def beat(k):
+                    return int(B[k] * 1000), int(B[k + 1] * 1000)
+
+                split = _splits[("left/right", "top/bottom")[li % 2]]
+                alt = PALETTES[_SPH_PALS[(li + 3) % len(_SPH_PALS)]]
+                every = list(_sph_all)
+                hits = ([k for k in range(nb) if B[k] in _hitset]
+                        or list(range(0, nb, 2)))
+                if look not in ("colour_beat", "stripes_spin", "stripes_alt"):
+                    for m in every:           # fully-lit looks are opaque anyway
+                        _p("off", m, a_ms, b_ms, PALETTES["white"], "run",
+                           layer=L_PULSE)
+                if look == "updown":
+                    rot = f"{nb / _cycle_beats:.1f}"
+                    for m in split[0]:
+                        _p("sphere_bounce", m, a_ms, b_ms, pal, "run",
+                           extra={"E_TEXTCTRL_Chase_Rotations": rot})
+                    for k in hits:
+                        s0, s1 = beat(k)
+                        for m in split[1]:
+                            _p("sphere_flash", m, s0, s0 + (s1 - s0) // 2, alt, "1")
+                elif look == "flash_halves":
+                    for k in range(nb):
+                        s0, s1 = beat(k)
+                        half, hp = ((split[0], pal) if k % 2 == 0
+                                    else (split[1], alt))
+                        for m in half:
+                            _p("sphere_flash", m, s0, s0 + (s1 - s0) // 2, hp, "1")
+                elif look == "colour_beat":
+                    for k in range(nb):
+                        s0, s1 = beat(k)
+                        cp = PALETTES[_COLOUR_SEQ[(li + k) % len(_COLOUR_SEQ)]]
+                        for m in every:
+                            _p("sphere_colour", m, s0, s1, cp, "run")
+                elif look == "chase_across":
+                    order = every if li % 2 == 0 else every[::-1]
+                    period = 2 * (len(order) - 1)
+                    for k in range(nb):
+                        s0, s1 = beat(k)
+                        idx = k % period
+                        pos = idx if idx < len(order) else period - idx
+                        _p("sphere_flash", order[pos], s0,
+                           s0 + int((s1 - s0) * 0.8), pal, "1")
+                elif look == "fill_pump":
+                    for k in range(nb):
+                        s0, s1 = beat(k)
+                        key = "fill_up" if k % 2 == 0 else "fill_down"
+                        for m in every:
+                            _p(key, m, s0, s1, pal, "run")
+                elif look == "stripes_spin":
+                    sp = PALETTES[_STRIPE_PALS[li % len(_STRIPE_PALS)]]
+                    for m in every:
+                        _p("sphere_stripes", m, a_ms, b_ms, sp, "run",
+                           extra={"E_TEXTCTRL_Bars_Cycles":
+                                  f"{max(1.0, nb / 4.0):.1f}"})
+                elif look == "stripes_alt":
+                    base = PALETTES[_STRIPE_PALS[li % len(_STRIPE_PALS)]]
+                    cols = list(base.colors)
+                    for j, k in enumerate(range(0, nb, 4)):
+                        s0 = int(B[k] * 1000)
+                        s1 = int(B[min(k + 4, nb)] * 1000)
+                        r = j % len(cols)
+                        sp = base.model_copy(update={"colors": cols[r:] + cols[:r]})
+                        for m in every:
+                            _p("sphere_stripes_fine", m, s0, s1, sp, "run")
+                elif look == "glitter_hits":
+                    for m in every:
+                        _p("sphere_scatter", m, a_ms, b_ms, pal, "run",
+                           layer=L_MOTION)
+                    for j, k in enumerate(hits):
+                        s0, s1 = beat(k)
+                        for m in split[j % 2]:
+                            _p("sphere_flash", m, s0, s0 + (s1 - s0) // 2, alt, "1")
+                elif look == "rain":
+                    for m in every:
+                        _p("sphere_rain", m, a_ms, b_ms, pal, "run")
+                _sph_hits.append({"start": a_ms, "end": b_ms, "on": set(every)})
+
+            _recent: list[str] = []
+            _nb_all = len(_bt)
+            _bi = 0
+            _li = 0
+            while _bi + 4 < _nb_all:
+                _t0 = _bt[_bi]
+                if in_ambient(_t0) or (_fd is not None and _t0 >= _fd):
+                    _bi += 1
+                    continue
+                _ev = _energy(_t0)
+                _hits8 = sum(1 for _x in _bt[_bi:_bi + 8] if _x in _hitset)
+                _pool = (_POOL_HI if _ev >= 0.66
+                         else _POOL_MID if _ev >= 0.33 else _POOL_LO)
+                if _hits8 < _min_hits:
+                    # A thin bass line calms the look by ONE TIER. Restricting
+                    # it to non-bass looks instead measured badly on 12 to 12:
+                    # the song is 92% high-energy, but its bass thins out often
+                    # enough that 25 of 45 looks collapsed onto the only two
+                    # non-bass looks in the top tier -- stripes, glitter,
+                    # stripes, glitter. Every look falls back to a beat pattern
+                    # when there are no bass hits, so none of them truly needs
+                    # the bass; the tier drop is just to keep a quiet bar quiet.
+                    _pool = _POOL_MID if _pool is _POOL_HI else _POOL_LO
+                _cands = [k for k in _pool if k not in _recent[-2:]] or list(_pool)
+                _look = _rng.choice(_cands)
+                _end = min(_bi + _LOOKS[_look][0], _nb_all - 1)
+                # STOP BEFORE AN AMBIENT PASSAGE OR THE FINAL DROPOUT BEGINS --
+                # on the last beat at or before it, judged against the
+                # passage's real start time. Checking ambient status only AT
+                # beat times let a passage that begins between two beats slip
+                # past: measured on Gooey, a stripes look ran 15.9-17.3s into
+                # the ambient passage starting at 17.0s, and a glitter look
+                # 26.2-27.6s into the one at 27.0s. Both rendered nothing at
+                # all.
+                _stop = min([_a["t0"] for _a in ambient_passages
+                             if _a["t0"] > _t0 + 0.05]
+                            + ([_fd] if _fd is not None and _fd > _t0 else []),
+                            default=1e9)
+                while _end > _bi and _bt[_end] > _stop + 0.02:
+                    _end -= 1
+                _nbd = _next_boundary(_t0)
+                if _bt[_end] > _nbd + 0.05:
+                    _cut = min(range(_bi + 1, _end + 1),
+                               key=lambda _k: abs(_bt[_k] - _nbd))
+                    if _cut - _bi >= _MIN_LOOK:
+                        _end = _cut
+                if _end - _bi < _MIN_LOOK:
+                    # Too short to be a look. Those two Gooey looks were
+                    # 2-beat fills of the gaps between ambient passages, which
+                    # is also exactly the "they only do a single effect for a
+                    # couple of beats" complaint -- a gap that small belongs to
+                    # the house, not to a new sphere idea.
+                    _bi = max(_end, _bi + 1)
+                    continue
+                _place(_look, _bt[_bi:_end + 1],
+                       PALETTES[_SPH_PALS[_li % len(_SPH_PALS)]], _li)
+                _sph_looks.append({"look": _look, "t0": round(float(_t0), 3),
+                                   "t1": round(float(_bt[_end]), 3),
+                                   "beats": _end - _bi})
+                _recent.append(_look)
+                _li += 1
+                _bi = _end
+            n_sphere_rhythm = _cnt[0]
+            _lc: dict[str, int] = {}
+            for _l in _sph_looks:
+                _lc[_l["look"]] = _lc.get(_l["look"], 0) + 1
+            _holds = sorted(_l["beats"] for _l in _sph_looks)
+            print(f"Sphere looks: {len(_sph_looks)} looks, median hold "
+                  f"{_holds[len(_holds) // 2] if _holds else 0} beats -- "
+                  + ", ".join(f"{k} {v}" for k, v in
+                              sorted(_lc.items(), key=lambda kv: -kv[1])))
+            if _hits:
+                log(_hits[0], "spheres",
+                    f"{len(_hits)} {_drv_name} hits on the beat, alternating "
+                    f"left/right and top/bottom halves")
+    print(f"Sphere rhythm: {n_sphere_rhythm} placements"
+          + (f" on {_drv_name}" if n_sphere_rhythm else " (no bass/kick voice)"))
 
     # --- 2h. Vocal phrase entries ------------------------------------------
     # A small swell on whichever prop already carries the `vocal` voice, at
@@ -9099,6 +10530,16 @@ def main():
         for eff in effects:
             if id(eff) in _dropped:
                 continue
+            # SPHERE LOOKS SET THEIR OWN FLASH RATE. The look pass never gives
+            # a sphere more than one flash per beat (<= 2 per second at 123
+            # bpm, half the 4/second this cap allows), but this cap judges each
+            # flash against every earlier start on the prop -- including the
+            # sphere bed from other passes, which `_g_spheres_rhythmic` deletes
+            # wholesale later. Measured on 12 to 12: 133 look flashes dropped
+            # here, a third of them, which is "flashing on the beat" with every
+            # third flash missing.
+            if eff.settings.get("X_Sphere"):
+                continue
             if eff.end_time_ms - eff.start_time_ms <= 400:
                 nm = (eff.model_name if key == "sub"
                       else eff.model_name.split("/")[0])
@@ -9626,8 +11067,24 @@ def main():
                 if any(_h0 < _wb * 1000 and _wa * 1000 < _h1
                        for _wa, _wb in blackout_windows):
                     continue
-                if not _lit_by_span(_h0, _h1):
-                    continue            # dark on purpose -- leave it dark
+                # "No whole-house span over this hole, so it is dark on
+                # purpose" is a proxy, and it was wrong in the one place it
+                # matters. Measured on Aperture: the 27.1s chorus drops at
+                # 30.2s, gets a shader bed to 35.0s, and then every big canvas
+                # -- the roof and all three matrices -- sits EMPTY until the
+                # ambient passage at 43.2s. Eight seconds bare in the middle of
+                # a chorus the arc had set to 75%, and the fill declined
+                # because no "ALL Display" span happened to cover it.
+                #
+                # Deliberate darkness is already caught above by
+                # blackout_windows. So the proxy now only decides QUIET
+                # sections: where the music is loud, a bare canvas is a gap,
+                # not a choice, and it gets filled.
+                _hs = next((i for i, sec in enumerate(analysis.sections)
+                            if sec.start_time <= _h0 / 1000.0 < sec.end_time), None)
+                _hl = float(section_loudness.get(_hs, 0.5)) if _hs is not None else 0.5
+                if _hl < 0.55 and not _lit_by_span(_h0, _h1):
+                    continue            # quiet and unlit -- dark on purpose
                 if (_h1 - _h0) < _BARE_ALONE_S * 1000 and \
                         _n_textured((_h0 + _h1) // 2) < len(_big_targets) // 2:
                     continue
@@ -9752,7 +11209,11 @@ def main():
             _spanning_chase = (_e.effect_name == "SingleStrand"
                                and _e.settings.get("B_CHOICE_BufferStyle")
                                == "Per Preview")
-            if _e.effect_name != "Bars" and not _spanning_chase:
+            # Sphere looks set their own bar count and rotation on purpose;
+            # the discipline below exists for Bars sweeping across the house.
+            if (_e.effect_name != "Bars" and not _spanning_chase) \
+                    or _e.settings.get("X_Sphere") \
+                    or _e.settings.get("X_MatrixBar"):
                 _keep.append(_e)
                 continue
             # On the beat.
@@ -9860,7 +11321,7 @@ def main():
         _MAX_REPEATS = 12
         _n = 0
         for _e in effects:
-            if _e.effect_name != "Bars":
+            if _e.effect_name != "Bars" or _e.settings.get("X_Sphere"):
                 continue
             _span = (_e.end_time_ms - _e.start_time_ms) / 1000.0
             if _span < _beat_s:
@@ -9983,8 +11444,18 @@ def main():
                       or t["name"] == "Garage Roof")]
         if not _canv or not SHADER_KEYS:
             return effects
+        # ONLY COUNT SHADERS ON THE CANVASES THIS PASS ACTUALLY PAINTS.
+        # The "already marked, skip it" test looked at EVERY Shader in the
+        # sequence, so a shader starting on the Tunnel or the Mega Tree at a
+        # boundary made this pass skip it -- while the big matrices, which are
+        # what `_canv` paints and what the eye reads as "the house look",
+        # changed nothing. Measured on Aperture: eight boundaries passed
+        # unmarked for exactly this reason.
+        _canv_names = {t2["name"] for t2 in _canv} | {
+            m for t2 in _canv for m in (t2.get("members") or [])}
         _sh = [(e.start_time_ms / 1000.0, e.model_name) for e in effects
-               if e.effect_name == "Shader"]
+               if e.effect_name == "Shader"
+               and e.model_name.split("/")[0] in _canv_names]
         _marked = 0
         for _i in range(1, len(analysis.sections)):
             _sec = analysis.sections[_i]
@@ -9995,7 +11466,35 @@ def main():
             # A real turn: the energy either side actually differs.
             _e0 = getattr(_prev, "energy_level", 0.0) or 0.0
             _e1 = getattr(_sec, "energy_level", 0.0) or 0.0
-            if abs(_e1 - _e0) < 0.12:
+            # A HAND-PLANNED BOUNDARY IS A BOUNDARY, whatever the levels say.
+            # The energy test exists to ignore the structure detector's weak
+            # guesses; when a human has declared the grid, a verse -> build
+            # change is real even if the loudness barely moves. Measured on
+            # "December": the 85.34s build differs from the verse before it by
+            # 0.02 energy, so this skipped it and verify_sections reported the
+            # boundary as passing with nothing changing -- while the plan had
+            # given it a different palette AND shader.
+            # MARK ON DURATION, NOT ON AN ENERGY DIFFERENCE.
+            #
+            # "Switching from verse to chorus or from one verse to the next
+            # should be clearly visible in the house look." The energy test
+            # was meant to ignore the structure detector's weak guesses, but on
+            # a song whose sections are genuinely similar in level it throws
+            # away the real ones too: measured on Aperture, only 10 of 20
+            # boundaries got a shader change, because consecutive choruses
+            # differ by less than 0.12 energy. Half the section changes passed
+            # with the house look unchanged.
+            #
+            # What actually separates a real boundary from over-segmentation is
+            # LENGTH -- the detector's spurious boundaries come in runs of
+            # short fragments (46 of Gooey's 57 sections, 94 of 100 in This
+            # Version of You, most of them a few seconds). A boundary with a
+            # substantial section on both sides is worth marking whatever the
+            # levels say.
+            _dur_prev = _prev.end_time - _prev.start_time
+            _dur_next = _sec.end_time - _sec.start_time
+            if (SONG_NAME not in SONG_SECTIONS
+                    and min(_dur_prev, _dur_next) < 7.0):
                 continue
             if any(abs(_s - _t) <= 0.25 for _s, _ in _sh):
                 continue                      # already marked
@@ -10244,6 +11743,2023 @@ def main():
         # never had their same-layer overlaps resolved at all.
         return effects
 
+    def _g_drop_blackout_is_real(effects):
+        # THE RUN-UP BLACKOUT HAS TO ACTUALLY BLACK THINGS OUT.
+        #
+        # "In Too Slow at the main 2:00 drop, everything drops out right
+        # before and goes dark except for the matrices with shaders and the
+        # drop loses some impact."
+        #
+        # The blackout was being placed correctly and then buried. Measured at
+        # that drop, on every big canvas:
+        #
+        #     layer 1  Shader  95039-121440ms
+        #     layer 0  Shader 102150-121440ms
+        #     layer 3  Off    118400-121450ms   <- the blackout
+        #
+        # Layer 0 renders on TOP (see the sphere notes), so an `Off` on L_SIG,
+        # which this generator treats as the top layer but is actually the
+        # bottom, sits underneath two shaders that keep running straight
+        # through it. Every song's biggest moment lost its contrast this way.
+        #
+        # Rather than renumber layers -- the rest of the generator is written
+        # against the old assumption -- the blackout is enforced directly:
+        # nothing else survives on that prop for the length of the window.
+        _bl = [e for e in effects if e.settings.get("X_Blackout") == "1"]
+        if not _bl:
+            return effects
+        _win: dict[str, list[tuple[int, int]]] = {}
+        for e in _bl:
+            _win.setdefault(e.model_name, []).append(
+                (e.start_time_ms, e.end_time_ms))
+        _drop, _trim = set(), 0
+        for e in effects:
+            if e.settings.get("X_Blackout") == "1":
+                continue
+            for _s0, _e0 in _win.get(e.model_name, ()):
+                if e.start_time_ms >= _e0 or e.end_time_ms <= _s0:
+                    continue
+                if e.start_time_ms >= _s0 and e.end_time_ms <= _e0:
+                    _drop.add(id(e))
+                elif e.start_time_ms < _s0:
+                    e.end_time_ms = _s0        # ends as the house goes dark
+                    _trim += 1
+                else:
+                    e.start_time_ms = _e0      # resumes on the drop
+                    _trim += 1
+                break
+        if _drop:
+            effects = drop_effects(effects, _drop, "buried under a drop blackout")
+        print(f"Drop blackout: {len(_win)} props cleared for the run-up "
+              f"({len(_drop)} effects removed, {_trim} trimmed)")
+        return effects
+
+    def _g_hero_prop_not_dark(effects):
+        # THE SHOWSTOPPER SPINNER SITS DARK.
+        #
+        # "The showstopper spinner still looks mostly dark most of the time...
+        # not sure if there's some ordering or layering issue that's
+        # overwriting all the effects you measured? The EFL flakes for example
+        # are way more lit and interesting most of the time."
+        #
+        # Measured in the render, it is NOT an overwrite: when the spinner is
+        # lit it lights 96% of its own nodes, so nothing is masking it. It is
+        # simply dark 40% of the song -- 16 gaps of a second or more, the
+        # longest 19s, 115s of darkness in total, against 32s for an EFL
+        # flake.
+        #
+        # The reason is group membership, which belongs to Krists's layout
+        # rather than to this generator. The EFL flakes carry ZERO effects on
+        # their own elements and are still lit 88% of the time, because they
+        # sit in the `Flakes Arms GRP` / `Flakes Spokes All GRP` submodel
+        # groups that receive minute-long colour washes. The spinner is in ten
+        # groups to the flake's sixteen and belongs to no equivalent bed, so
+        # whenever no pass happens to target it directly, nothing lights it.
+        #
+        # Rather than ask for a layout change, its long gaps get the same kind
+        # of bed here.
+        _HERO_BED = {"Showstopper Spinner"}
+        _grp = layout.get("xlights_model_groups", {}) or {}
+
+        def _expand(name, _seen=None):
+            _seen = _seen or set()
+            if name not in _grp:
+                return {name}
+            _out = set()
+            for _m in _grp.get(name, []):
+                if _m in _seen:
+                    continue
+                _seen.add(_m)
+                _out |= _expand(_m, _seen)
+            return _out
+
+        _DEDICATED = 30
+
+        def _reaches(model, name):
+            """Does an effect on `name` count as a BED for `model`?
+
+            Only dedicated coverage counts. A house-wide group technically
+            reaches the prop, but a shader spread over the whole display
+            leaves plenty of its pixels dark -- measured, the spinner was
+            covered by `ALL Display` for 141s and still rendered dark for
+            115s. What keeps the EFL flakes lit is their own small submodel
+            groups, so only targets of that size count here."""
+            if name == model:
+                return True
+            # A SUBMODEL EFFECT IS NOT A BED. 328 of the spinner's effects sit
+            # on its submodels, each lighting one ring or arch of a 541-node
+            # prop, so the effect timeline looked continuous while the prop
+            # still rendered dark 40% of the time. Only whole-prop coverage
+            # counts here; the submodel detail then plays ON TOP of the bed,
+            # which is what the flakes' arm and spoke groups amount to.
+            if name.startswith(model + "/"):
+                return False
+            if name not in _grp:
+                return False
+            _mem = _expand(name)
+            return model in _mem and len(_mem) <= _DEDICATED
+
+        _MIN_GAP, _added = 4000, 0
+        _BAND = 7          # consecutive parts lit per family per beat
+        for _prop in _HERO_BED:
+            # An Off is darkness, not coverage.
+            _iv = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                         if e.effect_name != "Off"
+                         and _reaches(_prop, e.model_name))
+            if not _iv:
+                continue
+            _merged: list[list[int]] = []
+            for _a, _b in _iv:
+                if _merged and _a <= _merged[-1][1] + 200:
+                    _merged[-1][1] = max(_merged[-1][1], _b)
+                else:
+                    _merged.append([_a, _b])
+            for _i in range(len(_merged) - 1):
+                _gs, _ge = _merged[_i][1], _merged[_i + 1][0]
+                if _ge - _gs < _MIN_GAP or _after_dropout(_gs):
+                    continue
+                # A wash, not a flash: this is a bed to sit under the passes
+                # that already target the prop, and the radial-wash guard has
+                # already flattened its gradient so it lights the whole prop
+                # evenly rather than on a diagonal.
+                # Soft-edged and not full brightness: the first version of
+                # this filled the prop to 93% lit at mean 124, against the EFL
+                # flakes' 85% and 79 -- brighter and more constant than the
+                # props he was comparing it to, which is its own problem. The
+                # long fades let each bed breathe in and out instead of
+                # switching the prop on.
+                # NOT A WASH ON THE PARENT. That was the first attempt and it
+                # is worse than the darkness it replaced: "at 0:30 in 12 to 12
+                # I see the showstopper spinner just lit white and flat and it
+                # just stays that way for a long time, fully lit." Measured,
+                # that moment was ONE Color Wash on the parent running
+                # 23450-77750ms -- 54 unbroken seconds of flat light.
+                #
+                # The prop carries 18 numbered submodel families -- Swirl
+                # Right-01..12, Swirl Left, Spinners - All-01..24, Cascading
+                # Arches, Circles, Big Y, Willow, Fireworks. Stepping through
+                # one of those on the beat IS rotation: the light travels
+                # around the prop. That is what "the EFL flakes or mini grand
+                # illusion have much more complex submodel movement and
+                # spinning and rhythm and flashing" is describing, and this
+                # prop has more of that structure than either of them.
+                _fams = SUBMODEL_FAMILIES.get(_prop) or {}
+                _names = [f for f in sorted(_fams) if len(_fams[f]) >= 6]
+                if not _names:
+                    continue
+                _gb = [b for b in beats if _gs / 1000.0 <= b <= _ge / 1000.0]
+                if len(_gb) < 4:
+                    continue
+                _step_ms = int(beat_ms)
+                for _bi2, _bt2 in enumerate(_gb[:-1]):
+                    # Two families at once, travelling in OPPOSITE directions,
+                    # each as a band of consecutive parts rather than a single
+                    # one. Stepping one part per beat was genuinely moving but
+                    # far too thin -- measured a median of 12% of the prop's
+                    # nodes lit against 76% on an EFL flake and 48% on the
+                    # Showstopper Snowflake, so the prop read as almost off.
+                    # A band of three doubled reached 32%; five is what puts it
+                    # in flake territory, which is where Krists asked for it.
+                    # Widen or narrow HERE -- it is the density control.
+                    _blk = _bi2 // 8
+                    _s2 = int(_bt2 * 1000)
+                    for _f2 in (0, 3):
+                        _fam = _fams[_names[(_i + _blk + _f2) % len(_names)]]
+                        _fwd = ((_blk + _f2) % 2) == 0
+                        for _w in range(_BAND):
+                            _k = (_bi2 + _w) % len(_fam)
+                            _part = _fam[_k if _fwd else len(_fam) - 1 - _k]
+                            add(f"{_prop}/{_part}", L_MOTION,
+                                ("on_pop" if _blk % 3 else "chase_mid_out"),
+                                _s2, _s2 + int(_step_ms * 0.9),
+                                PALETTES[("glacier", "regal", "gold", "violet",
+                                          "ember", "ice")[(_i + _blk + _f2) % 6]])
+                            _added += 1
+                continue
+                _added += 1
+        if _added:
+            print(f"Hero bed: {_added} submodel steps placed across the dark "
+                  f"stretches on {', '.join(sorted(_HERO_BED))}")
+        return effects
+
+    def _g_no_diagonal_wash_on_radial(effects):
+        # NO GRADIENT ACROSS A RADIAL PROP.
+        #
+        # "In Harmony at 0:50 for a while the EFL flakes have half of them
+        # illuminated and half dark but it's at an angle, it's the top left
+        # that's lit and the bottom right is dark and I've seen it elsewhere
+        # and it looks odd."
+        #
+        # That is `wash` -- Color Wash with HFade -- on the flakes' arm and
+        # spoke groups. A horizontal gradient over a prop whose pixels radiate
+        # from a centre does not read as "left to right"; it cuts across the
+        # arms at whatever angle their node order happens to run, leaving a
+        # lopsided half-lit flake. Fine on a matrix, wrong on anything radial.
+        #
+        # The fade is dropped rather than the effect: he asked for "all lit or
+        # just a different effect without that diagonal split", and a Color
+        # Wash with no fade is exactly an evenly lit prop that still breathes
+        # with its palette.
+        _RADIAL = ("flake", "snowflake", "spinner", "spoke", "arm", "star",
+                   "wreath", "rosa", "grande", "illusion", "showstopper")
+        _n = 0
+        for e in effects:
+            if e.effect_name != "Color Wash":
+                continue
+            if not any(h in e.model_name.lower() for h in _RADIAL):
+                continue
+            if e.settings.get("E_CHECKBOX_ColorWash_HFade") == "1" or \
+                    e.settings.get("E_CHECKBOX_ColorWash_VFade") == "1":
+                e.settings = {**e.settings,
+                              "E_CHECKBOX_ColorWash_HFade": "0",
+                              "E_CHECKBOX_ColorWash_VFade": "0"}
+                _n += 1
+        if _n:
+            print(f"Radial props: {_n} colour washes flattened (no diagonal "
+                  f"half-lit split across arms and spokes)")
+        return effects
+
+    def _g_no_whole_tunnel_flash(effects):
+        # THE TUNNEL IS TOO BIG TO FLASH, EVEN ONE ARCH AT A TIME.
+        #
+        # "We're often flashing the whole tunnel matrix or at least the tunnel
+        # arches, but we agreed not to flash such large props. Even if there's
+        # a texture underneath, flashing the whole tunnel is too much because
+        # it's big."
+        #
+        # The no-flash rule in add() never saw these. It judges the TARGET,
+        # and the beat-anchor pass expands the tunnel group into its 80
+        # individual `Tunnel Arches N` models -- each one small enough to pass
+        # the test, all 80 firing on the same millisecond. Measured 10,640 flat
+        # `On` flashes on the tunnel in one song, ~97 simultaneous whole-tunnel
+        # hits.
+        #
+        # Rather than drop them and lose the beat entirely, each hit is cut
+        # down to a contiguous THIRD of the tunnel, and which third moves from
+        # hit to hit. The beat still lands, on a section that travels down the
+        # tunnel instead of the whole thing going off in the viewer's face.
+        _arch = [e for e in effects
+                 if e.effect_name == "On"
+                 and e.model_name.lower().startswith("tunnel arches")
+                 and float(e.settings.get("T_TEXTCTRL_Fadeout", 1) or 1) < 0.5]
+        if not _arch:
+            return effects
+        def _idx(nm):
+            _m = re.search(r'(\d+)$', nm)
+            return int(_m.group(1)) if _m else 0
+        _by_t: dict[int, list] = {}
+        for e in _arch:
+            _by_t.setdefault(e.start_time_ms, []).append(e)
+        _n_models = len({e.model_name for e in _arch})
+        _drop = set()
+        _hits = 0
+        for _k, (_t, _grp) in enumerate(sorted(_by_t.items())):
+            if len(_grp) < _n_models * 0.5:
+                continue                       # already a partial gesture
+            _hits += 1
+            _ids = sorted(_grp, key=lambda e: _idx(e.model_name))
+            _third = max(1, len(_ids) // 3)
+            _start = (_k * _third) % len(_ids)
+            _keep = {id(e) for e in
+                     (_ids + _ids)[_start:_start + _third]}
+            _drop |= {id(e) for e in _ids if id(e) not in _keep}
+        if _drop:
+            effects = drop_effects(effects, _drop,
+                                   "whole-tunnel flash cut to a travelling third")
+            print(f"Tunnel: {_hits} whole-tunnel flashes cut to a travelling "
+                  f"third ({len(_drop)} effects removed)")
+        return effects
+
+    def _prop_families():
+        """Name-based families, for judging BALANCE across the house."""
+        _f = {"Arches/Tunnel": [], "Roof/Gutters": [], "Verticals": [],
+              "Flakes/Spinners": [], "Canes/Trees": [], "Matrices": [],
+              "Floods": []}
+        for _m in positions:
+            _l = _m.lower()
+            if "arch" in _l or "tunnel" in _l:
+                _f["Arches/Tunnel"].append(_m)
+            # GARAGE ROOF RESTS WITH THE MATRICES, not with the gutters. It is
+            # an 18,576-channel flat canvas and every rhythm pass now treats it
+            # as one (see is_matrix_canvas), but this table still had it filed
+            # under Roof/Gutters -- so when the rotation rested "Matrices" it
+            # masked the other five and left the Garage Roof firing alone:
+            # "the garage roof flashes at 4:15 which is weird, while all the
+            # others are quiet." Measured there: five matrices under an X_Rest
+            # Off from 249.3s, Garage Roof running nine bar sweeps through it.
+            elif is_matrix_canvas(_m):
+                _f["Matrices"].append(_m)
+            elif _m.startswith("Single Line"):
+                _f["Roof/Gutters"].append(_m)
+            elif _m.startswith("Vertical Strip"):
+                _f["Verticals"].append(_m)
+            elif any(h in _m for h in ("Flake", "Snowflake", "Spinner", "Rosa",
+                                       "Illusion", "Wreath", "Star")):
+                _f["Flakes/Spinners"].append(_m)
+            elif "Cane" in _m or "Mini Tree" in _m:
+                _f["Canes/Trees"].append(_m)
+            elif "matrix" in _l:
+                _f["Matrices"].append(_m)
+            elif _l.startswith("flood"):
+                _f["Floods"].append(_m)
+        return {k: set(v) for k, v in _f.items() if v}
+
+    def _g_arch_fours(effects):
+        """A sustained run of leaps ACROSS the row, one per beat.
+
+        "I'm still not really seeing the arch chases. Aperture would be a
+        perfect song for arches to chase back and forth on the fourths rhythm.
+        I don't see them though."
+
+        _g_arch_leap only RESHAPES chases that other passes already placed, so
+        it could never fix a shortage. Measured on Aperture v174: 191 chases on
+        the four big arches, 187 of them on a single arch each, median span
+        0.28s, and something chasing for only 12% of the song. This places the
+        missing ones -- on the `Arches` GROUP as one strand, one chase per
+        beat, a beat long, alternating direction every bar so the row runs
+        back and forth, and every fourth bar all four fire together.
+
+        Loud sections only: it is a rhythm device, and a quiet passage wants
+        the arches drifting, not marching.
+        """
+        # The cast's `groups` map is built inside build_cast() and is not in
+        # scope here, so the group is validated against the layout the same way
+        # the canvas passes validate the channel map -- a name that is not a
+        # real xLights group renders as a stale orphan.
+        try:
+            _lay = json.loads((SHOW_PATH / ".generation" /
+                               "layout.json").read_text())["xlights_model_groups"]
+        except Exception:
+            return effects
+        _grp = next((g for g in ("Arches", "Arches GRP") if _lay.get(g)), None)
+        if _grp:
+            # Left-to-right by real world position, so "the row" is the row the
+            # audience sees, not the order the group happens to list.
+            _members_lr = sorted(
+                (m for m in (_lay.get(_grp) or []) if m in positions),
+                key=lambda m: positions[m]["x"])
+            if len(_members_lr) < 3:
+                return effects
+        if not _grp or not beats or beat_ms < 120:
+            return effects
+        _beat_s = beat_ms / 1000.0
+        _bar_s = _beat_s * 4.0
+        _step = _beat_s * 2.0
+        _blk = [(a / 1000.0, b / 1000.0) for a, b in blackout_windows]
+        _busy = sorted((e.start_time_ms / 1000.0, e.end_time_ms / 1000.0)
+                       for e in effects
+                       if e.model_name.split("/")[0] == _grp
+                       and e.effect_name == "SingleStrand")
+        # THE REST WINS. This guard runs after _g_rest_rotation, which masks a
+        # resting family with a model-level Off on every member -- and a
+        # model-level Off blanks a group-level leap completely. Measured: 16 of
+        # 97 leaps were placed inside an arch rest and could never be seen.
+        # A section where the arches are sitting out does not leap.
+        _rested = sorted((e.start_time_ms / 1000.0, e.end_time_ms / 1000.0)
+                         for e in effects
+                         if e.settings.get("X_Rest") == "1"
+                         and e.model_name.split("/")[0] in set(_lay.get(_grp) or []))
+        _n, _n_leap, _bars_done = 0, 0, 0
+        _dev_i, _devlog = 0, []
+        for _si, _sec in enumerate(analysis.sections):
+            _lv = float(section_loudness.get(_si, getattr(_sec, "energy_level", 0.5) or 0.5))
+            if _lv < 0.55:
+                continue
+            _pal = (section_meta[_si].get("palette")
+                    if _si < len(section_meta) else None) or PALETTES["white"]
+            # ONE CHASE PER TWO BEATS, not per beat. "They're not set up to
+            # take one full beat like the verticals do" -- measured, and he is
+            # right: on Aperture (129.2 BPM, beat 0.464s) the Corner/Left
+            # Vertical chases that DO read run a median 0.93s, exactly two
+            # beats, while the first version of this ran 0.42s. A dot crossing
+            # four arches in under half a second is a flicker; across two beats
+            # it is a leap. Direction alternates every chase, so the row runs
+            # back and forth on the half-note.
+            # ONE COLOUR. Four arches stepping through a three-colour palette
+            # is four different colours at once, which is half of why it read
+            # as chaos rather than as one gesture crossing the row.
+            _c1 = (_pal.colors or ["#FFFFFF"])[0]
+            _pal = _pal.model_copy(update={"colors": [_c1], "active_colors": [1]})
+            _k2 = 0
+            _t = _sec.start_time
+            while _t < _sec.end_time - _bar_s * 0.6:
+                _bt = min(beats, key=lambda x: abs(x - _t))
+                _t += _bar_s
+                if _bt >= _sec.end_time - 0.05:
+                    break
+                if any(a - 0.1 <= _bt <= b + 0.1 for a, b in _blk):
+                    continue
+                if final_dropout is not None and _bt >= final_dropout:
+                    continue
+                if any(a < _bt + _bar_s and _bt < b for a, b in _rested):
+                    continue
+                _k2 += 1
+                # ONE ARCH PER BEAT, PLACED ON THE ARCHES THEMSELVES.
+                #
+                # Fourth attempt, and the first that does not depend on how
+                # xLights maps a GROUP into a buffer. Measured on v185 at
+                # 1:20, where the `Bars` + `As Pixel` leap was the only effect
+                # on the arches: all four rendered flat at 224, 100% lit, for
+                # the whole bar -- "just flat white for a long time without
+                # doing anything at all". `As Pixel` did not step. Rather than
+                # guess again at buffer semantics, the leap is now built from
+                # four MODEL-level hits, one per beat, in order across the row.
+                # A model-level effect beats a group-level one, so the arch
+                # that is meant to be lit is lit and the others are not,
+                # whatever bed the parent groups are running.
+                # ONE DEVICE PER PASSAGE, NOT ONE PER BAR. Alternating every
+                # bar is what made the row look random: "I see one leap, then
+                # the next arch looks like it maybe has a spiral or spinner,
+                # then another arch might leap, then another arch flashes...
+                # all those effects are good but they should be more cohesive.
+                # Do leaping back and forth, or do flashing across them, or do
+                # the spinning thing changing directions on the beat."
+                #
+                # So a device is chosen per SECTION and held for the whole of
+                # it, rotating section to section so the show still varies.
+                # PLACES NOTHING. The `Leaping arches` pass (search
+                # "Leaping arches:") already owns this gesture and already has
+                # the three shapes Krists asked for -- sweep (one bar across
+                # all four), pairs (two bars across two arches) and solo. This
+                # guard placing its own leap/step/spin on top of that is what
+                # made the row incoherent: "one arch leaps, one spins, one two
+                # leap, the directions are random, it makes no sense." One
+                # owner, and this pass now only clears what competes with it.
+                _bars_done += 1
+
+        # AND CLEAR WHAT SITS ON TOP OF THEM. "I didn't see any leaps even
+        # across one arch, they're hidden under something else." Measured: 32%
+        # of the group's leaps were masked by short per-model chases on
+        # L_BASE of Arch 1-4. L_BASE is the TOP layer and a MODEL-level effect
+        # wins over a GROUP-level one, so a 0.23s blink on one arch blanks the
+        # leap crossing all four. The blinks go; the leap is the better effect.
+        # A LEAP MUST BE THE ONLY THING ON THE ARCHES WHILE IT RUNS.
+        # "Whatever they're doing now is completely and totally wrong... just
+        # chaotic." Measured on v179: up to SIX effects live on the arches at
+        # once (mean 1.5, p90 5) -- 203 flat `On` flashes on the group and 258
+        # chases on top of each other. No single gesture can be seen through
+        # that. Everything overlapping a leap goes, on the group AND on the
+        # individual arches, except deliberate darkness.
+        _members = set(_lay.get(_grp) or []) | {_grp}
+        _runs = [(e.start_time_ms, e.end_time_ms) for e in effects
+                 if e.settings.get("X_ArchOwner") == "1"]
+        _kill = set()
+        if _runs:
+            for e in effects:
+                if e.settings.get("X_ArchOwner") == "1":
+                    continue
+                if e.effect_name == "Off" or e.settings.get("X_Blackout") == "1":
+                    continue
+                if e.settings.get("X_Rest") == "1":
+                    continue
+                if e.model_name.split("/")[0] not in _members:
+                    continue
+                # NOT filtered by layer. The writer emits only the layers
+                # that actually hold effects, so an effect's `layer` value and
+                # its index in the .xsq are different numbers -- an earlier
+                # version tested `layer == L_BASE` and matched nothing. It does
+                # not matter anyway: a MODEL-level effect masks a GROUP-level
+                # one whatever layer it sits on.
+                #
+                # A long bed is trimmed rather than dropped, so the arches keep
+                # their colour between leaps (the span-bleed rule).
+                _ov = [(a, b) for a, b in _runs
+                       if a < e.end_time_ms and e.start_time_ms < b]
+                if not _ov:
+                    continue
+                if e.end_time_ms - e.start_time_ms > _bar_s * 1000:
+                    e.end_time_ms = max(e.start_time_ms + FRAME_MS,
+                                        min(e.end_time_ms, int(_ov[0][0])))
+                    continue
+                _kill.add(id(e))
+        if _kill:
+            effects = drop_effects(effects, _kill,
+                                   "a blink on one arch was hiding the leap")
+        if _n or _n_leap:
+            print(f"Arch clean-up: {len(_kill)} competing effects removed so the "
+                  f"leaping-arches gesture reads alone")
+        return effects
+
+    def _g_arch_leap(effects):
+        """The arches should LEAP again -- a chase running along the row.
+
+        "Previously they also did a chase more often, like where they look like
+        they are leaping because a chase goes from left to right on the beat,
+        or multiple chases, or chases changing colors... I rarely see that
+        anymore but it's a great rhythmic effect."
+
+        Measured on Bluey v15: of 173 chases on the four big arches, 138 were
+        `From Middle` -- a symmetric burst, not a leap -- and only 35 ran
+        left-to-right or right-to-left. The cause is the Bars retirement:
+        `bars_expand` and friends were mapped to `chase_mid_out`, which is
+        From Middle, so every directional sweep the arches used to get became a
+        centre burst.
+
+        Two thirds of those become a directional run again, alternating with
+        the bar so consecutive hits leap the other way, and one in three of
+        those carries two or three dots instead of one.
+        """
+        _bar_s = (beat_ms / 1000.0) * 4.0
+        _rng2 = random.Random(f"{SONG_NAME}|arch-leap")
+        _n = 0
+        # ORDINAL PER ARCH, not a beat number. The wave has to alternate on
+        # consecutive LEAPS, and the beat grid has gaps -- a leap at 186.72
+        # followed by one at 187.68 is two beats apart, so beat-index parity
+        # repeats and two leaps in a row run the same way. Measured: 14 of
+        # 15 reversals, with the one repeat exactly at such a gap. Numbering
+        # each arch's own chases in time order makes every consecutive pair
+        # reverse, whatever the beats do.
+        _ord: dict[int, int] = {}
+        _byname: dict[str, list] = {}
+        for _e2 in effects:
+            if (_e2.effect_name == "SingleStrand" and (re.fullmatch(r"Arch \d+", _e2.model_name)
+                      or _e2.model_name == "Arches")
+                    and _e2.settings.get("E_CHOICE_Chase_Type1") in (
+                        "From Middle", "Left-Right", "Right-Left",
+                        "Bounce from Left")):
+                _byname.setdefault(_e2.model_name, []).append(_e2)
+        for _lst in _byname.values():
+            _lst.sort(key=lambda x: x.start_time_ms)
+            for _k5, _e3 in enumerate(_lst):
+                _ord[id(_e3)] = _k5
+        for e in effects:
+            if e.effect_name != "SingleStrand":
+                continue
+            _nm = e.model_name
+            if not (re.fullmatch(r"Arch \d+", _nm) or _nm == "Arches"):
+                continue
+            _ct = e.settings.get("E_CHOICE_Chase_Type1")
+            if _ct not in ("From Middle", "Left-Right", "Right-Left",
+                           "Bounce from Left"):
+                continue
+            # THE LEAP ALTERNATES WITH THE BAR, so consecutive hits jump the
+            # other way instead of always running the same direction -- that
+            # back-and-forth is what reads as leaping. A third carry two or
+            # three dots, which is the "multiple chases" variation; the rest
+            # stay single so the effect keeps its snap.
+            _bar_i = int((e.start_time_ms / 1000.0) / max(_bar_s, 1e-6))
+            # PER BEAT, not per bar -- this guard rewrites the direction of
+            # every arch chase after the fact, so a per-BAR flip here undoes
+            # the per-beat wave the leaping pass just placed.
+            _beat_i = _ord.get(id(e), 0)
+            _dir = "Left-Right" if _beat_i % 2 == 0 else "Right-Left"
+            # ...and the same wiring compensation here, since this guard
+            # rewrites the direction of every arch chase after the fact.
+            # Without it the shaping pass re-introduces the 1-2 vs 3-4
+            # split that the owning pass just corrected.
+            _dir = travel_dir_for(_nm, _dir, model_wiring_dir("Arch 1"))
+            _st = {**e.settings, "E_CHOICE_Chase_Type1": _dir}
+            # PER BAR, NOT PER EFFECT. Rolling this once per effect gave
+            # each arch its own dot count in the same bar -- measured at
+            # 4:41: Arch1 n=1, Arch2 n=3, Arch3 n=1, Arch4 n=1, then
+            # n=2/1/3/1 the next beat. Krists: "each arch is doing a
+            # different kind of leap in a different direction... something
+            # is still competing for them." Nothing was competing for the
+            # SLOT -- the provenance tool showed one effect per arch, all
+            # from the leaping pass -- this guard was re-shaping each of
+            # them independently afterwards. Seeding on the bar index makes
+            # all four arches draw the same shape at the same time, while
+            # still varying bar to bar.
+            _r = random.Random(f"{SONG_NAME}|arch-leap|{_bar_i}").random()
+            if _r < 0.22:
+                _st["E_SLIDER_Number_Chases"] = "2"
+            elif _r < 0.34:
+                _st["E_SLIDER_Number_Chases"] = "3"
+            else:
+                _st["E_SLIDER_Number_Chases"] = "1"
+            # ...and every fourth bar swaps to the section's accent colour, so
+            # a run of leaps changes colour rather than repeating identically.
+            if _bar_i % 4 == 3:
+                _si = next((i for i, x in enumerate(analysis.sections)
+                            if x.start_time <= e.start_time_ms / 1000.0 < x.end_time), None)
+                if _si is not None and _si < len(section_meta):
+                    _ap = section_meta[_si].get("accent")
+                    if _ap is not None:
+                        e.palette = _ap
+            e.settings = _st
+            _n += 1
+        if _n:
+            print(f"Arch leap: {_n} arch chases shaped -- direction alternates "
+                  f"with the bar, a third carry 2-3 dots, every fourth bar "
+                  f"changes colour")
+        return effects
+
+    def _g_matrix_beat_shaders(effects):
+        """A shader on a matrix should MOVE with the song, not just sit there.
+
+        "We don't have much rhythmic movement on the matrices, and we have lots
+        of matrices which are big canvas for us to use. I'd like the shaders to
+        maybe move more and change direction on the beat or change zoom
+        direction on the beat."
+
+        Measured on Bluey v15: 120 shader placements across nine matrices with
+        a median span of 1.9s and no beat-locked parameter movement at all.
+
+        A shader bed longer than two bars is cut into two-bar pieces that
+        alternate the sign of the shader's speed -- which reverses its drift --
+        and step the zoom slightly, so the canvas changes direction on the bar
+        line. The shader itself never changes, so the section still reads as
+        one texture.
+        """
+        _bar_ms = int((beat_ms) * 4)
+        if _bar_ms < 500:
+            return effects
+        _chunk = _bar_ms * 2
+
+        # ONE CLOCK FOR THE WHOLE HOUSE. The pieces used to be cut from each
+        # effect's OWN start time, so two matrices whose beds began a beat
+        # apart flipped direction a beat apart forever after -- "each matrix
+        # does a different pulsing speed so it doesn't look good". The grid is
+        # now absolute: the first downbeat (or first beat) of the song, every
+        # two bars. Every canvas turns on the same bar line.
+        _grid0 = int(1000 * (downbeats[0] if downbeats else
+                             (beats[0] if beats else 0.0)))
+
+        # SNAP TO A REAL DOWNBEAT. "I thought we had all matrices changing
+        # together, and right on the kick drum beat of a new bar or section
+        # always, what happened to that?" The grid was computed as
+        # first_downbeat + N * (beat_ms * 4), which drifts: beat_ms is a single
+        # median for the whole song, so by the end of a 312s track the computed
+        # bar line and the actual one are far apart. Measured on v182 -- shader
+        # changes landed within 80ms of a real downbeat only 21% of the time,
+        # median 392ms off. Every edge is now pulled onto the nearest ACTUAL
+        # downbeat the analysis found.
+        _dbs = sorted(int(x * 1000) for x in (downbeats or beats or []))
+
+        def _snap_down(ms: int) -> int:
+            if not _dbs:
+                return ms
+            import bisect
+            _j = bisect.bisect_left(_dbs, ms)
+            _best = min((abs(_dbs[_c] - ms), _dbs[_c])
+                        for _c in (_j - 1, _j, _j + 1) if 0 <= _c < len(_dbs))
+            return _best[1] if _best[0] <= _chunk // 2 else ms
+
+        def _next_edge(ms: int) -> int:
+            """First shared two-bar boundary strictly after ms, on a real bar."""
+            _k = (ms - _grid0) // _chunk + 1
+            return _snap_down(_grid0 + int(_k) * _chunk)
+
+        # A BEAT-LOCKED SPEED CURVE. "In Aperture at the first drop around
+        # 0:30 there is a green shader that seems to be changing with the beat.
+        # It's actually slightly off the beat but if it was right on the beat
+        # it would be a perfect example." That shader is Sequin Flip at a FIXED
+        # E_SLIDER_Shader_Speed of 209 -- a constant drift that happens to be
+        # near the tempo and walks out of phase with it. A value curve on the
+        # speed makes the texture surge on every beat instead, exactly on our
+        # own beat grid.
+        #
+        # Format copied from Krists's own sequences (Kpop Demon Hunters,
+        # Blinding Lights): the shader speed curve spans -1000..1000, so 0.50
+        # is a DEAD STOP and the useful range is a rest a little above it with
+        # a spike on each beat. Values are fractions of the effect's span.
+        def _beat_speed_curve(a_ms: int, b_ms: int, spd: int) -> str:
+            """The animation RUNS BACKWARD on alternate beats.
+
+            "For shaders could they reverse their animation, like forward
+            backward to the rhythm, is that possible?" Yes, and it is much the
+            best of these: the speed curve spans -1000..1000, so 0.50 is a dead
+            stop and anything below it runs the shader's own animation in
+            reverse. Stepping across 0.50 on each beat makes the texture go
+            forward, back, forward, back in time -- a rhythm made of the
+            shader's own motion rather than a modulation laid over it.
+
+            The earlier version only SURGED the speed (always forward, just
+            faster on the beat) and measured as no change at all: matrix beat
+            salience went 8.04 -> 7.60.
+            """
+            _span = max(1, b_ms - a_ms)
+            _mag = max(0.10, min(0.42, abs(spd) / 1000.0))
+            _fwd, _rev = 0.5 + _mag, 0.5 - _mag
+            _pts, _k4 = [], 0
+            for _bt in beats:
+                _f = (_bt * 1000 - a_ms) / _span
+                if not (0.0 <= _f <= 1.0):
+                    continue
+                _k4 += 1
+                _v = _fwd if _k4 % 2 else _rev
+                _pts.append((max(0.0, _f), _v))
+                _pts.append((min(1.0, _f + 0.001), _v))
+            if len(_pts) < 4:
+                return ""
+            # Hold the FIRST value back to 0.0 and the LAST out to 1.0, so the
+            # curve starts and ends on a real direction instead of ramping from
+            # whatever xLights assumes. (An earlier edit left a stale `_rest`
+            # here; it resolved to an unrelated list in the enclosing scope and
+            # failed as a TypeError rather than a NameError, which is worth
+            # remembering -- a leftover name in a nested function does not
+            # necessarily crash loudly.)
+            _pts = sorted(_pts, key=lambda x: x[0])[:60]
+            if _pts[0][0] > 0.0:
+                _pts.insert(0, (0.0, _pts[0][1]))
+            if _pts[-1][0] < 1.0:
+                _pts.append((1.0, _pts[-1][1]))
+            _seen, _out = set(), []
+            for _f, _v in _pts:
+                _k = round(float(_f), 3)
+                if _k in _seen:
+                    continue
+                _seen.add(_k)
+                _out.append(f"{_k:.3f}:{float(_v):.2f}")
+            return ("Active=TRUE|Id=ID_VALUECURVE_Shader_Speed|Type=Custom|"
+                    "Min=-1000.00|Max=1000.00|RV=TRUE|Values=" + ";".join(_out) + "|")
+
+        # AND MOVE THE IMAGE ITSELF. "I'm still not seeing rhythmic shaders...
+        # Do shaders move back and forth on the beat or change color on the
+        # beat or anything like that? I'm not seeing it."
+        #
+        # No -- and a speed curve alone was never going to show it. Shader
+        # speed changes how fast the texture's own animation runs, which on
+        # most of these .fs files is a subtle change of churn, not a movement
+        # you can point at. Measured: adding the speed curve moved the
+        # matrices' beat salience from 8.04 to 7.60, i.e. nowhere.
+        #
+        # Offset_X slides the whole rendered image across the canvas. Stepping
+        # it between two positions on alternate beats makes the picture itself
+        # jump left-right-left-right ON the beat, which is a movement that
+        # reads from the street. Range is -100..100 like Zoom (verified against
+        # Biometrix - Silent Night, which ramps Offset_X -100 -> 100).
+        # WHICH AXIS is a property of the SECTION, so a passage has one idea
+        # and every canvas shares it: left/right, then up/down, then a zoom
+        # breath, rotating section by section. "Experiment with that some more,
+        # like up/down in addition to the left/right, maybe zoom in/out."
+        _AXES = ("Offset_X", "Offset_Y", "Zoom", "Offset_X", "Offset_Y")
+
+        def _axis_for(ms: int) -> str:
+            _i4 = next((i for i, s in enumerate(analysis.sections)
+                        if s.start_time <= ms / 1000.0 < s.end_time), 0)
+            return _AXES[_i4 % len(_AXES)]
+
+        def _beat_offset_curve(a_ms: int, b_ms: int, amp: float = 18.0) -> str:
+            _span = max(1, b_ms - a_ms)
+            _pts, _k3 = [], 0
+            for _bt in beats:
+                _f = (_bt * 1000 - a_ms) / _span
+                if not (0.0 <= _f <= 1.0):
+                    continue
+                _k3 += 1
+                _v = 0.5 + (amp / 200.0) * (1 if _k3 % 2 else -1)
+                # hold the position for the beat, then step on the next one
+                _pts.append((round(max(0.0, _f), 3), round(_v, 3)))
+                _pts.append((round(min(1.0, _f + 0.001), 3), round(_v, 3)))
+            if len(_pts) < 4:
+                return ""
+            if _pts[0][0] > 0.0:
+                _pts.insert(0, (0.0, _pts[0][1]))
+            if _pts[-1][0] < 1.0:
+                _pts.append((1.0, _pts[-1][1]))
+            _seen, _out2 = set(), []
+            for _f, _v in sorted(_pts)[:60]:
+                if _f in _seen:
+                    continue
+                _seen.add(_f)
+                _out2.append(f"{_f:.3f}:{_v:.2f}")
+            _ax = _axis_for(a_ms)
+            if _ax == "Zoom":
+                # Zoom is a breath in and out rather than a side step, so it
+                # sits above centre and pumps, never crossing to a mirror.
+                _out2 = [f"{float(x.split(':')[0]):.3f}:"
+                         f"{0.5 + abs(float(x.split(':')[1]) - 0.5):.2f}"
+                         for x in _out2]
+            return (f"Active=TRUE|Id=ID_VALUECURVE_Shader_{_ax}|Type=Custom|"
+                    "Min=-100.00|Max=100.00|RV=TRUE|Values=" + ";".join(_out2) + "|")
+
+        _n, _n_curve = 0, 0
+        for e in list(effects):
+            if e.effect_name != "Shader":
+                continue
+            _nm = e.model_name
+            if not is_matrix_canvas(_nm):
+                continue
+            if e.settings.get("X_AmbientSlowed") == "1":
+                continue
+            _dur = e.end_time_ms - e.start_time_ms
+            if _dur < _bar_ms:
+                continue
+
+            # DO NOT CUT THE BED. Every new Shader effect restarts the shader's
+            # own animation from t=0, so slicing a bed into two-bar pieces made
+            # the picture run smoothly and then snap back to its starting
+            # position at each boundary: "they often seem to move multiple
+            # beats smoothly and then jump to reset... it looks like a loop
+            # that's too short and doesn't fully loop around... a bit glitchy
+            # or stuttery or off beat." One continuous effect, with the beat
+            # curves spanning its whole length, moves on the beat AND stays
+            # smooth for as long as it is on screen.
+            _si5 = next((i for i, s in enumerate(analysis.sections)
+                         if s.start_time <= e.start_time_ms / 1000.0 < s.end_time),
+                        None)
+            _lv5 = float(section_loudness.get(_si5, 0.5)) if _si5 is not None else 0.5
+            _near_drop = any(abs(e.start_time_ms / 1000.0 - _d) < 8.0
+                             for _d in (SNAPPED_DROPS or []))
+
+            # ...AND ONLY WHERE IT EARNS ITS PLACE. "I think we're using the
+            # shader movement just a bit too much... we should use it more for
+            # heavy rhythmic sections or drops or choruses and not overuse it
+            # all the time." Beat-locked movement is now a device for the loud
+            # sections and the bars around a drop; everywhere else the shader
+            # simply plays, which is what makes those moments land.
+            # GATE ON THE RHYTHM, NOT JUST THE VOLUME. "Does the shader
+            # movement have to be gated only on loudness? Can't we gate it on
+            # how strong of a rhythm there is or something?" -- right, and
+            # loudness is a poor stand-in twice over. It is a proxy for "is
+            # there a beat to lock to" (a loud pad has none), and on a
+            # uniformly loud song it barely discriminates at all: at 0.65 nine
+            # of Aperture's nineteen sections qualified.
+            #
+            # Section LABELS were the other obvious candidate and are worse --
+            # the detector calls 14 of Aperture's 19 sections "chorus", 46 of
+            # Gooey's 57 "transition" and 94 of 100 in This Version of You. A
+            # label gate would be a coin flip dressed up as intent.
+            #
+            # So: beat-locked shader movement needs a BEAT -- measured as kick
+            # and snare onsets per second in the section, the same signal the
+            # leaping arches gate on -- and then either real weight behind it
+            # or a drop nearby. Rhythm is the necessary condition; loudness
+            # only decides which of the rhythmic sections get it.
+            _drum5 = 0.0
+            if _si5 is not None:
+                _sec5 = analysis.sections[_si5]
+                for _v5 in ("kick", "snare"):
+                    if _v5 in voices:
+                        _drum5 = max(_drum5, voices[_v5].density_in(
+                            _sec5.start_time, _sec5.end_time))
+            if _drum5 < 1.3:
+                continue                      # nothing steady to move against
+            if _lv5 < 0.80 and not _near_drop:
+                continue
+
+            _spd = int(e.settings.get("E_SLIDER_Shader_Speed", 200) or 200)
+            _st = dict(e.settings)
+            for _dead_ax in ("Offset_X", "Offset_Y", "Zoom"):
+                _st.pop(f"E_VALUECURVE_Shader_{_dead_ax}", None)
+            _c = _beat_speed_curve(e.start_time_ms, e.end_time_ms, _spd)
+            if _c:
+                _st["E_VALUECURVE_Shader_Speed"] = _c
+            _o = _beat_offset_curve(e.start_time_ms, e.end_time_ms)
+            if _o:
+                _st[f"E_VALUECURVE_Shader_{_axis_for(e.start_time_ms)}"] = _o
+            if _c or _o:
+                e.settings = _st
+                _n_curve += 1
+                _n += 1
+        if _n:
+            print(f"Matrix shaders: {_n} continuous beds given beat-locked "
+                  f"movement (no cutting, so the animation never resets); "
+                  f"quiet sections left to play smoothly")
+        return effects
+
+    def _g_arches_clean(effects):
+        """The four big arches are never HALF-lit by a whole-house bed.
+
+        "There is often some part of a whole house effect or some other group
+        effect that partially lights up some of the arches and then movement
+        effects are on top, but I don't really like the static or slow partial
+        thing... Either light them all up, or use them for movement, or leave
+        them alone."
+
+        Measured on 12 to 12: `ALL Display` carries ten Shader beds totalling
+        145 seconds, and a house-wide shader paints whatever part of its image
+        happens to fall across each arch -- a slow, partial, arbitrary wash
+        with the leaps sitting on top of it. The arches are a rhythm prop; a
+        fragment of somebody else's picture is the one thing they should not
+        be showing.
+
+        So wherever a big multi-prop group is lighting them and the arch has no
+        gesture of its own, the arch is masked with a model-level Off (which
+        beats a group effect). The result is exactly his three options: their
+        own movement, or dark -- never a slice of a house bed.
+        """
+        try:
+            _lay2 = json.loads((SHOW_PATH / ".generation" /
+                                "layout.json").read_text())["xlights_model_groups"]
+        except Exception:
+            return effects
+        _arch = {m for m in positions if re.fullmatch(r"Arch \d+", m)}
+        if not _arch:
+            return effects
+
+        def _expand(n, seen=None):
+            seen = seen or set()
+            if n in seen:
+                return set()
+            seen.add(n)
+            if n not in _lay2:
+                return {n}
+            _o = set()
+            for _m in _lay2[n]:
+                _o |= _expand(_m, seen)
+            return _o
+
+        # A group counts as "somebody else's bed" when the arches are a small
+        # minority of it -- the house groups. `Arches` itself is exempt: an
+        # effect there is FOR them.
+        _house = set()
+        for _g in _lay2:
+            _mem = _expand(_g)
+            if _mem & _arch and len(_mem) >= 8 and len(_mem & _arch) < len(_mem) * 0.5:
+                _house.add(_g)
+        _beds = [(e.start_time_ms, e.end_time_ms) for e in effects
+                 if e.model_name.split("/")[0] in _house
+                 and e.effect_name not in ("Off",)
+                 and e.end_time_ms - e.start_time_ms >= 1500]
+        if not _beds:
+            return effects
+        _own = {a: [] for a in _arch}
+        for e in effects:
+            _b = e.model_name.split("/")[0]
+            if _b in _own and e.effect_name != "Off":
+                _own[_b].append((e.start_time_ms, e.end_time_ms))
+        _n_mask = 0
+        for _a in sorted(_arch):
+            _mine = sorted(_own[_a])
+            for _b0, _b1 in _beds:
+                _cur2 = _b0
+                for _s, _e2 in _mine:
+                    if _e2 <= _cur2 or _s >= _b1:
+                        continue
+                    if _s > _cur2:
+                        add(_a, L_PULSE, "off", _cur2, min(_s, _b1),
+                            PALETTES["white"], {"X_ArchMask": "1"})
+                        _n_mask += 1
+                    _cur2 = max(_cur2, _e2)
+                    if _cur2 >= _b1:
+                        break
+                if _cur2 < _b1 - 200:
+                    add(_a, L_PULSE, "off", _cur2, _b1,
+                        PALETTES["white"], {"X_ArchMask": "1"})
+                    _n_mask += 1
+        if _n_mask:
+            print(f"Arches clean: {_n_mask} spans masked where a whole-house bed "
+                  f"was half-lighting them ({len(_beds)} house beds seen)")
+        return effects
+
+    def _g_matrix_unison(effects):
+        """Every matrix shows the SAME thing. Enforced late, not hoped for.
+
+        "The garage roof matrix still seems to often do its own thing and not
+        be the same as the other matrices. I think I'd really like them all to
+        do the same thing, especially when it's shaders. It looks weird to have
+        different shaders on different matrices."
+
+        Two placement-time causes, both deliberate and both wrong for these
+        props: `palette_variant(palette, large_seat)` hands every large canvas
+        a DIFFERENT lead colour, and the shared-hero choice is only shared
+        among targets routed through that one site. Chasing the sites has
+        failed twice before (see the pinned-shader guard), so this settles it
+        at the end: at any moment, whatever the most-covered matrix is showing,
+        every other matrix shows exactly that -- same shader file, same speed
+        and offset curves, same palette.
+
+        Also strips the beat BRIGHTNESS pulse from the matrices. "Let's not do
+        the brightness pulsing on the matrices, it's too much in most cases, I
+        would only keep it rarely for a very rhythmic section with high energy
+        and only if all matrices do it together in sync which they currently
+        don't." Kept only in the top-energy sections, and there applied
+        identically to every matrix so they breathe together.
+        """
+        # Active=0 models are inert, so including them just moves effects
+        # nowhere -- measured, the three retired Front Window Matrices were
+        # still taking 264 placements each.
+        _mats = sorted({m for m in positions if is_matrix_canvas(m)})
+        if len(_mats) < 2:
+            return effects
+        _lv = {i: float(section_loudness.get(i, 0.5))
+               for i in range(len(analysis.sections))}
+        _hot = {i for i, v in _lv.items() if v >= 0.80}
+
+        # CLONE ONE CANVAS'S WHOLE SHADER TRACK ONTO ALL THE OTHERS.
+        #
+        # "The matrices are still not together with each other, for example at
+        # 2:40 multiple matrices are doing different shaders and they're all
+        # doing different movements at different speeds and it's very messy."
+        # Measured at 160.0s: THREE shaders at once (Cable Knit on three
+        # canvases, Chromatophore on two, Contour Drift on the Garage Roof),
+        # speeds +386 / -216 / -392, axes Offset_X vs Offset_Y, and spans that
+        # do not even line up (155.80-170.40 against 159.52-161.43).
+        #
+        # Two earlier attempts failed the same way: they MERGED settings while
+        # leaving each canvas its own effects. Picking the majority shader at
+        # each effect's start cannot converge (at 155.90 the vote was 3-3 and
+        # both survived), and nothing touched the mismatched SPANS, which are
+        # what "different movements at different speeds" actually is.
+        #
+        # So the shader track is not merged, it is REPLACED: the canvas with
+        # the most shader time is the template, and every other matrix gets a
+        # verbatim copy of its pieces -- same spans, same shader file, same
+        # speed, same axis, same curves. Identical inputs render identically,
+        # which is the only way these move as one.
+        _sh = [e for e in effects
+               if e.effect_name == "Shader" and e.model_name in _mats]
+        _n_sh, _lead, _template = 0, None, []
+        if _sh:
+            _cover = {}
+            for e in _sh:
+                _cover[e.model_name] = (_cover.get(e.model_name, 0)
+                                        + e.end_time_ms - e.start_time_ms)
+            _lead = max(_cover, key=lambda k: _cover[k])
+            _template = sorted((e for e in _sh if e.model_name == _lead),
+                               key=lambda e: e.start_time_ms)
+            _drop_sh = {id(e) for e in _sh if e.model_name != _lead}
+            if _drop_sh:
+                effects = drop_effects(effects, _drop_sh,
+                                       "matrices show ONE shader, not five")
+            for _m4 in _mats:
+                if _m4 == _lead:
+                    continue
+                for _src3 in _template:
+                    effects.append(_src3.model_copy(update={
+                        "model_name": _m4,
+                        "settings": {**_src3.settings, "X_MatrixSync": "1"}}))
+                    _n_sh += 1
+
+        # One palette across the matrices, per moment -- kills palette_variant's
+        # per-canvas lead colour, which is the other half of "doing its own
+        # thing".
+        _n_pal, _n_pulse = 0, 0
+        _by_start = {}
+        for e in effects:
+            if e.model_name not in _mats or e.palette is None:
+                continue
+            _by_start.setdefault(
+                (e.effect_name, e.start_time_ms // 50), []).append(e)
+        for _grp2 in _by_start.values():
+            if len(_grp2) < 2:
+                continue
+            _p0 = _grp2[0].palette
+            for e in _grp2[1:]:
+                if e.palette is not _p0:
+                    e.palette = _p0
+                    _n_pal += 1
+
+        for e in effects:
+            if e.model_name not in _mats or e.palette is None:
+                continue
+            _parts = list(e.palette.extra_parts or [])
+            if not any(x.startswith("C_VALUECURVE_Brightness=") for x in _parts):
+                continue
+            # ALL of it goes. The "keep it in the top-energy sections" version
+            # was still per-canvas and unsynchronised: "at 3:25 the matrices
+            # all strobe at different rates and it looks terrible, don't do
+            # that." Until the pulse can be applied identically across every
+            # canvas, no matrix pulses at all.
+            e.palette = e.palette.model_copy(update={
+                "extra_parts": [x for x in _parts
+                                if not x.startswith("C_VALUECURVE_Brightness=")]})
+            _n_pulse += 1
+
+        print(f"Matrix unison: every matrix cloned from {_lead!r} "
+              f"({_n_sh} shader pieces copied, {len(_template)} per canvas), "
+              f"{_n_pal} palettes matched, {_n_pulse} brightness pulses removed")
+        return effects
+
+    def _g_matrix_bars(effects):
+        """A big bar sweeping the matrices, as rhythm.
+
+        Requested directly. One sweep every two bars in the energetic sections
+        only, alternating side-to-side and up-down by section so a passage has
+        ONE orientation -- the old complaint was bars changing orientation
+        mid-phrase, not bars as such. Never inside a drop blackout, never on a
+        tunnel, and tagged so the Bars discipline guard leaves them alone.
+        """
+        _mats = sorted({m for m in positions if is_matrix_canvas(m)})
+        if not _mats or not beats:
+            return effects
+        _beat_s = beat_ms / 1000.0
+        _bar_s = _beat_s * 4.0
+        _secs = list(analysis.sections)
+        _blk = [(a / 1000.0, b / 1000.0) for a, b in blackout_windows]
+        _rng2 = random.Random(f"{SONG_NAME}|matrix-bars")
+        _n = 0
+        for _si, _sec in enumerate(_secs):
+            _lv = float(section_loudness.get(_si, getattr(_sec, "energy_level", 0.5) or 0.5))
+            # ...and only where there is a real beat under them, the same
+            # rhythm test the shader movement uses. A bar sweep is a
+            # rhythmic device and needs a rhythm to belong to.
+            _drum6 = 0.0
+            for _v6 in ("kick", "snare"):
+                if _v6 in voices:
+                    _drum6 = max(_drum6, voices[_v6].density_in(
+                        _sec.start_time, _sec.end_time))
+            if _drum6 < 0.9:
+                continue
+            if _lv < 0.6:
+                continue                      # rhythm device, for the loud bars
+            _horiz = (_si % 2 == 0)
+            _t = _sec.start_time
+            _k = 0
+            while _t < _sec.end_time - _bar_s * 0.5:
+                _b = min(beats, key=lambda x: abs(x - _t))
+                if (not any(a - 0.1 <= _b <= b + 0.1 for a, b in _blk)
+                        and not (final_dropout is not None
+                                 and _b >= final_dropout)):
+                    _key = (("matrix_bar_lr", "matrix_bar_rl") if _horiz
+                            else ("matrix_bar_up", "matrix_bar_dn"))[_k % 2]
+                    # ONE COLOUR. The section palette carries three or more,
+                    # and Bars paints a different one per bar -- which is what
+                    # "multiple bars of different colors" was. A sweep meant to
+                    # read as a beat is a single stroke of a single colour.
+                    _spal = (section_meta[_si].get("palette")
+                             if _si < len(section_meta) else None) or PALETTES["white"]
+                    # COLOUR CHANGES ON THE BEAT. "I don't see them changing
+                    # colors on the beat." A Shader paints from its own .fs
+                    # file and ignores the palette, so the matrices' colour
+                    # rhythm has to come from the thing that IS palette-driven
+                    # -- the bar. Consecutive sweeps alternate between two
+                    # colours of the section palette, so each beat lands a
+                    # different colour while staying inside the section's
+                    # story. Still ONE colour per sweep.
+                    _cols = _spal.colors or ["#FFFFFF"]
+                    _c1 = _cols[_k % len(_cols)]
+                    _pal = _spal.model_copy(update={
+                        "colors": [_c1], "active_colors": [1]})
+                    for _m in _mats:
+                        # ...and it crosses in half a beat, so it lands as a
+                        # snap ON the beat instead of drifting across the bar.
+                        add(_m, L_MOTION, _key, int(_b * 1000),
+                            int((_b + _beat_s * 0.55) * 1000), _pal,
+                            {"X_MatrixBar": "1"})
+                        _n += 1
+                _k += 1
+                # ONE PER BAR. Per BEAT was far too much: 1,662 sweeps in
+                # 12 to 12, each lighting 30-60% of a canvas, on every
+                # matrix, twice a second. On props this size that reads as
+                # flashing, which is the one thing they must not do --
+                # "we made it so the matrices couldn't flash or strobe
+                # because they are just too big, it's too much for the
+                # eyes for entire matrices to flash, but now I see them
+                # flashing". A sweep on the bar line is a rhythm; a sweep
+                # on every beat is a strobe.
+                _t += _bar_s
+        if _n:
+            print(f"Matrix bars: {_n} single-bar sweeps across {len(_mats)} "
+                  f"matrices, one per BAR, {_beat_s*0.55:.2f}s each, one "
+                  f"colour, only where the drums are driving")
+        return effects
+
+    def _g_rest_rotation(effects):
+        """Something sits out, so something else can be the subject.
+
+        A designer's read of Bluey found the flaw that costs the show the most
+        character: EVERY prop family was lit in EVERY section, 90-97% of the
+        song. Nothing is ever featured, because nothing is ever absent -- the
+        tunnel, the roofline, the tree, the flakes and the canes are all on,
+        always, and the eye has nowhere to go.
+
+        So each section rests one family (two, in a long one), rotating through
+        the song. The Mega Tree, the spheres and the orbs are never rested:
+        the tree is the centrepiece and the other two carry the melody.
+
+        Deliberately not applied to the quietest sections -- their arc ceiling
+        has already pulled them down, and taking a family out of an already
+        dark passage removes contrast rather than creating it.
+        """
+        _fams = _prop_families()
+        if not _fams:
+            return effects
+        # A REST ONLY READS IF THE FAMILY IS BIG ENOUGH TO MISS. The rotation
+        # used to treat every family as one equal turn, but they are nothing
+        # like equal shares of the house -- measured on the 2026 layout:
+        # Flakes/Spinners 24.9% of all channels, Arches/Tunnel 21.2%,
+        # Matrices 17.6%, Roof/Gutters 17.0%, Canes/Trees 5.3%,
+        # Verticals 1.4%, Floods 0.0% (nine floods, 27 channels).
+        # So on Aperture four of the twelve rests were spent on Floods and
+        # Verticals, where nothing visibly sat out at all, while the eye kept
+        # being told that nothing in this show ever rests. Families under 4%
+        # of the house are skipped: they cost a turn and buy no contrast.
+        try:
+            _cm_r = json.loads((SHOW_PATH / ".generation" /
+                                "channel_map.json").read_text())["models"]
+        except Exception:
+            _cm_r = {}
+        _chan = {_fam: sum(int(_cm_r.get(_m, {}).get("count", 0)) for _m in _ms)
+                 for _fam, _ms in _fams.items()}
+        _tot_ch = sum(_chan.values()) or 1
+        _names = sorted(f for f in _fams if _chan[f] / _tot_ch >= 0.04)
+        if not _names:
+            return effects
+        _secs = list(analysis.sections)
+        _rng2 = random.Random(f"{SONG_NAME}|rest")
+        _k = _rng2.randrange(len(_names))
+        _drop, _trim, _log = set(), 0, []
+        for _i, _sec in enumerate(_secs):
+            _lv = float(section_loudness.get(_i, getattr(_sec, "energy_level", 0.5) or 0.5))
+            # REST IS A LOUD-SECTION DEVICE. The arc already pulls quiet
+            # passages down; resting a family there as well stacks two
+            # subtractions on the same bars. Measured when it did: the 52.1s
+            # verse fell to 10% of the house lit for 22 seconds, and the show
+            # overall to mean 38.7 against a ~50% human norm -- a dead house,
+            # not a quiet one. One family, and only where there is enough
+            # light for its absence to read.
+            # REST IS A MID-SECTION DEVICE, NOT A BIG-SECTION ONE.
+            # "Make sure the matrices aren't sitting out for big sections.
+            # For big sections we need brightness and want it to be a photo
+            # opportunity or video opportunity for people watching the
+            # lights, so sitting things out should only be for quieter"
+            # sections.
+            #
+            # The floor stays -- resting a family in an already-dim passage
+            # stacks two subtractions and gives a dead house, which is the
+            # 10%-lit verse this guard was rewritten for once already. The
+            # ceiling is new: above 0.75 nothing sits out at all, so the
+            # biggest moments have the whole house in them. On Aperture
+            # that frees the 0.918, 0.957 and 1.000 sections, which were
+            # all being rested.
+            if _lv < 0.55 or _lv >= 0.75:
+                continue
+            _n_rest = 1
+            _resting = [_names[(_k + _j) % len(_names)] for _j in range(_n_rest)]
+            _k += _n_rest
+            # THE ARCHES PLAY THE BIG MOMENTS. "They seem to sit out at
+            # important high energy parts of the song, they should
+            # participate." The rotation was landing Arches/Tunnel on
+            # top-energy sections, where the leaping gesture is the most
+            # valuable thing the house has -- and a rest there also blanks it,
+            # since the rest masks each arch with a model-level Off. Above
+            # 0.8 loudness the arches are passed over and the next family
+            # sits out instead.
+            _models = set().union(*[_fams[_r] for _r in _resting])
+            for e in effects:
+                if e.model_name.split("/")[0] not in _models:
+                    continue
+                if not (_sec.start_time <= e.start_time_ms / 1000.0 < _sec.end_time):
+                    continue
+                if e.settings.get("X_Blackout") == "1" or e.effect_name == "Off":
+                    continue
+                # A BED THAT OUTLIVES THE REST IS TRIMMED, NOT DELETED.
+                # This used to drop anything STARTING in the rested section
+                # however far past it the effect ran -- and on the big
+                # canvases the bed IS a long span. Measured on Aperture v173:
+                # resting Arches/Tunnel for the 138.1s section deleted the
+                # Tunnel's shader outright, and because that shader ran to
+                # 170s the FOLLOWING section lost its bed too. The tunnel then
+                # sat at 3.7% covered and the whole 153.8s chorus rendered at
+                # 16% of the house lit -- the darkest section of the song,
+                # under an arc ceiling of 97%. A rest must end when it ends.
+                if e.end_time_ms / 1000.0 > _sec.end_time + 0.4:
+                    e.start_time_ms = int(_sec.end_time * 1000)
+                    _trim += 1
+                    continue
+                _drop.add(id(e))
+            # DROPPING THE FAMILY'S OWN EFFECTS IS NOT ENOUGH. These props sit
+            # inside whole-house groups, so an effect on "ALL Display" keeps
+            # lighting them and the rest never happens -- measured, the first
+            # version of this removed 1774 effects and the render still showed
+            # every family lit in nine of eleven sections. An opaque Off on the
+            # model masks the group (a model-level effect wins over a group
+            # one), which is the same technique the spheres use.
+            #
+            # The family REJOINS for a staged drop: a hit with a family missing
+            # is a weaker hit, and the rest is about the passage, not the
+            # moment.
+            _holes = [(max(_sec.start_time, _d - 0.25),
+                       min(_sec.end_time, _d + 1.8))
+                      for _d in (SNAPPED_DROPS or [])
+                      if _sec.start_time - 0.25 < _d < _sec.end_time]
+            _spans, _cur = [], _sec.start_time
+            for _h0, _h1 in sorted(_holes):
+                if _h0 > _cur + 0.4:
+                    _spans.append((_cur, _h0))
+                _cur = max(_cur, _h1)
+            if _sec.end_time > _cur + 0.4:
+                _spans.append((_cur, _sec.end_time))
+            for _m2 in _models:
+                for _a2, _b2 in _spans:
+                    add(_m2, L_PULSE, "off", int(_a2 * 1000), int(_b2 * 1000),
+                        PALETTES["white"], {"X_Rest": "1"})
+            _log.append(f"{_sec.label or '?'}@{_sec.start_time:.0f}s:{'+'.join(_resting)}")
+        if _drop:
+            effects = drop_effects(effects, _drop, "resting so another family reads")
+            print(f"Rest rotation: {len(_drop)} effects removed, {_trim} long beds "
+                  f"trimmed to the rest's end -- " + ", ".join(_log))
+        return effects
+
+    def _g_pace_movement(effects):
+        """No section is twice as busy as the ones around it.
+
+        Measured on Bluey: the 74.4s chorus fired 166.7 effect starts per
+        second against 102-109 in the other choruses, almost all of it short
+        flat hits. Excitement is relative -- a section that is half again
+        busier than its neighbours reads as frantic, not as a lift.
+
+        The busiest sections are trimmed back towards the median of the
+        ACTIVE sections by dropping their shortest, least structural
+        placements first. Drop staging, section markers, sphere looks and
+        anything already dark are never touched.
+        """
+        _secs = list(analysis.sections)
+        _rate, _bysec = {}, {}
+        for _i, _sec in enumerate(_secs):
+            _dur = max(0.1, _sec.end_time - _sec.start_time)
+            _in = [e for e in effects
+                   if _sec.start_time <= e.start_time_ms / 1000.0 < _sec.end_time]
+            _bysec[_i] = _in
+            _rate[_i] = len(_in) / _dur
+        _active = [v for i, v in _rate.items()
+                   if float(section_loudness.get(i, 0.5)) >= 0.35]
+        if len(_active) < 3:
+            return effects
+        _med = float(np.median(_active))
+        _cap = _med * 1.35
+        _drop = set()
+        for _i, _in in _bysec.items():
+            _dur = max(0.1, _secs[_i].end_time - _secs[_i].start_time)
+            if _rate[_i] <= _cap:
+                continue
+            _excess = int(len(_in) - _cap * _dur)
+            _cands = [e for e in _in
+                      if e.effect_name in ("On", "Off")
+                      and e.end_time_ms - e.start_time_ms < 400
+                      and not e.settings.get("X_Sphere")
+                      and not e.settings.get("X_Blackout")
+                      and e.layer != L_SIG]
+            _cands.sort(key=lambda e: e.end_time_ms - e.start_time_ms)
+            for e in _cands[:max(0, _excess)]:
+                _drop.add(id(e))
+        if _drop:
+            effects = drop_effects(effects, _drop, "pacing: section was too busy")
+            print(f"Pacing: {len(_drop)} short hits removed from the busiest "
+                  f"sections (cap {_cap:.0f} starts/s, median {_med:.0f})")
+        return effects
+
+    def _g_section_colour(effects):
+        """A section should read as ONE colour, not as a wash of everything.
+
+        Measured on Bluey: the verse and break read strongly (top-two hue
+        share 78-79%) but two sections came out at 37-39% -- the house showing
+        every hue at once, with no identity, in a section that had a palette
+        pinned to it. Beds are retinted to the section's palette; short
+        accents, drop staging and the melody keep their own colour, because
+        those are the deliberate contrast.
+        """
+        _pins = SONG_SECTION_LOOK.get(SONG_NAME) or {}
+        if not _pins:
+            return effects
+        _times = sorted(_pins)
+        _secs = list(analysis.sections)
+        # A BED MUST NOT CARRY THE PREVIOUS SECTION'S COLOUR INTO THIS ONE.
+        # Measured at 92.0s, inside a section pinned to the gold-and-blue
+        # `climax` palette: 114 of 160 lit props showed magenta 300deg and
+        # lime -- the `resin` palette from the section that started at 74.4s,
+        # on beds that simply ran on. Retinting by the effect's START cannot
+        # fix that, so long beds are cut at the boundary first; the next
+        # section's own beds already begin there.
+        _bounds = [x.start_time for x in _secs[1:]]
+        _cut = 0
+        _new = []
+        for e in effects:
+            if e.end_time_ms - e.start_time_ms < 2000 or e.effect_name == "Off":
+                continue
+            if e.settings.get("X_Blackout") == "1" or e.layer == L_SIG:
+                continue
+            _a, _b = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            _cross = [x for x in _bounds if _a + 0.4 < x < _b - 0.4]
+            if _cross:
+                # SPLIT, don't truncate. Cutting the bed off at the boundary
+                # fixed the colour bleed and took the light with it: the 52.1s
+                # verse fell to 12% of the house lit because the beds carrying
+                # it began in the section before. The tail continues as its own
+                # effect, which the retint below then gives the new section's
+                # palette.
+                # The tail is a DECAY, not a continuation. Letting it run
+                # its full length restored the light (the verse went 12% ->
+                # 44% lit) but flooded the quiet sections with the loud one's
+                # beds: contrast fell from 9.8x back to 2.9x and the builds
+                # came out brighter than the intro again. Two seconds of
+                # overlap covers the handover to the new section's own beds
+                # and then gets out of the way.
+                _b0 = int(_cross[0] * 1000)
+                # A BIG CANVAS CARRIES ITS TEXTURE THROUGH; everything else
+                # gets two seconds of decay. The 52.1s verse has few beds of
+                # its own and had been living off the previous section's --
+                # cutting them took it to 12% of the house lit for 22 seconds.
+                # Letting every bed run on instead flooded the quiet sections
+                # and halved the contrast. The canvases are only a handful of
+                # props, so they hold the passage up without filling it in.
+                _bigc = (e.model_name in ("Mega Tree", "Garage Roof",
+                                          "Tunnel Matrix Real")
+                         or "matrix" in e.model_name.lower())
+                _tail_end = (e.end_time_ms if _bigc
+                             else min(e.end_time_ms, _b0 + 2000))
+                _tail = e.model_copy(update={
+                    "start_time_ms": _b0, "end_time_ms": _tail_end,
+                    "settings": {**e.settings, "T_TEXTCTRL_Fadeout": "1.5"}})
+                e.end_time_ms = _b0
+                _new.append(_tail)
+                _cut += 1
+        if _new:
+            effects = list(effects) + _new
+        if _cut:
+            print(f"Section colour: {_cut} beds split at a section boundary so "
+                  f"the old palette does not run on (the tail continues in the "
+                  f"new palette)")
+        _n = 0
+        for e in effects:
+            if e.end_time_ms - e.start_time_ms < 500:
+                continue                      # an accent keeps its colour
+            if e.settings.get("X_Blackout") == "1" or e.effect_name == "Off":
+                continue
+            if e.layer == L_SIG:
+                continue                      # drop staging / melody
+            _t = e.start_time_ms / 1000.0
+            _c = [x for x in _times if x <= _t + 0.25]
+            if not _c:
+                continue
+            _pal_name = _pins[_c[-1]].get("palette")
+            if not _pal_name or _pal_name not in PALETTES:
+                continue
+            _want = PALETTES[_pal_name]
+            if e.palette is None or list(e.palette.colors) == list(_want.colors):
+                continue
+            # keep whatever brightness shaping the effect already carries
+            e.palette = _want.model_copy(update={
+                "extra_parts": list(e.palette.extra_parts or [])})
+            _n += 1
+        if _n:
+            print(f"Section colour: {_n} beds retinted to their section palette")
+        return effects
+
+    def _g_movement_over_flash(effects):
+        """A prop with shape should MOVE on the beat, not just switch on.
+
+        Measured on Bluey: 6417 of ~11200 placements were a flat `On` (57%),
+        67% of them under 250ms, and ~4100 came from the beat-anchor passes.
+        Krists's own sequences measure 6% `On` against 30% SingleStrand and
+        21% Shockwave -- his vocabulary is movement-led, and that is the
+        difference between "things switching on" and "things moving".
+
+        Short flat beat hits on props with real spatial extent become a
+        gesture that draws the prop's own shape instead. Props with no extent
+        (floods, orbs, single-node decorations) keep the flash, because motion
+        on one pixel can only be flicker.
+        """
+        try:
+            _cm = json.loads((SHOW_PATH / ".generation" /
+                              "channel_map.json").read_text())["models"]
+        except Exception:
+            return effects
+        _nodes = {k: v.get("count", 0) // 3 for k, v in _cm.items()}
+
+        # THE PULSE KEEPS ITS FLASH. "I feel like we've lost some of the
+        # overall rhythm... it needs to catch your eye and be clearly on the
+        # beat." He is right and it measures: on Aperture this guard turned
+        # 13,828 short flat on-beat hits into 3,190, and beat salience --
+        # the size of the brightness jump ON the beat against the jumps
+        # between beats -- fell from 8.92x to 6.99x, the on-beat jump from
+        # 8.47 to 5.49. The hits never left the beat (99% of the gestures are
+        # still within 70ms of one); they stopped being JUMPS. A flat On is an
+        # instant full-prop step change and the eye locks onto it; a chase
+        # lights a few pixels at a time and reads as texture.
+        #
+        # So the conversion now skips the STRONG beats -- the downbeat and the
+        # half-bar, phase-locked to the song's own first downbeat. Every other
+        # beat still turns into movement, which keeps the vocabulary
+        # movement-led the way Krists's own sequences are, but the house now
+        # punches twice a bar where the eye can find it.
+        _strong_ms = set()
+        if beats:
+            _b0 = downbeats[0] if downbeats else beats[0]
+            _bi = min(range(len(beats)), key=lambda i: abs(beats[i] - _b0))
+            for _i3 in range(_bi % 2, len(beats), 2):
+                _strong_ms.add(int(beats[_i3] * 1000))
+        _strong = sorted(_strong_ms)
+
+        def _on_strong(ms: int) -> bool:
+            if not _strong:
+                return False
+            import bisect
+            _j = bisect.bisect_left(_strong, ms)
+            for _c in (_j - 1, _j):
+                if 0 <= _c < len(_strong) and abs(_strong[_c] - ms) <= 70:
+                    return True
+            return False
+
+        def _key_for(nm):
+            _l = nm.lower()
+            if any(h in _l for h in ("flake", "snowflake", "spinner", "wreath",
+                                     "star", "rosa", "illusion", "sphere", "orb")):
+                return "shockwave"
+            if "arch" in _l:
+                # AN ARCH LEAPS. Sending it to `chase_mid_out` (From Middle)
+                # is what quietly removed the leap: this guard was the largest
+                # single source of centre-bursts on the arches.
+                return "chase_lr" if (hash(nm) % 2 == 0) else "chase_rl"
+            if any(h in _l for h in ("tree", "cone")):
+                return "chase_mid_out"
+            if any(h in _l for h in ("c9", "single line", "vertical", "icicle",
+                                     "gutter", "outline", "horizontal")):
+                return "strand_bounce"
+            return "chase_mid_out"
+
+        _n = 0
+        for e in effects:
+            if e.effect_name != "On" or e.layer == L_SIG:
+                continue
+            _d = e.end_time_ms - e.start_time_ms
+            # A GESTURE NEEDS ROOM TO TRAVEL. This used to convert any hit of
+            # 120-400ms, but a travelling gesture needs about two beats to
+            # read (measured against the verticals, which run 0.93s at 129
+            # BPM); a 200ms chase is a faint smear that is strictly worse than
+            # the flash it replaced. Only spans long enough to actually show
+            # the movement are converted -- the rest stay flashes.
+            _min_gesture = max(360, int(beat_ms * 1.5))
+            if not (_min_gesture <= _d < max(_min_gesture + 40, 900)):
+                continue
+            if any(e.settings.get(k) for k in ("X_Sphere", "X_Blackout")):
+                continue
+            if _on_strong(e.start_time_ms):
+                continue                      # this one IS the pulse
+            # A CALL-AND-RESPONSE PAIR IS ONE GESTURE. Left answers right on
+            # alternate beats, so "keep the flash on strong beats" kept one
+            # side and converted the other -- measured on Aperture v185: after
+            # the 30.2s drop, Arch 3 and 4 held flat `On` hits while Arch 1 and
+            # 2 became 0.20s SingleStrand chases. Krists saw exactly that:
+            # "the right two arches are flashing on every other beat but the
+            # left two arches show something very faint... multiple parts
+            # slightly lit and moving too fast". Same on the C9s.
+            if e.settings.get("X_AntiPhase") == "1":
+                continue
+            _base = e.model_name.split("/")[0]
+            if _nodes.get(_base, 0) < 30:
+                continue                      # no room for a gesture
+            _k = _key_for(e.model_name)
+            if _k not in EFFECTS:
+                continue
+            _en, _sett = EFFECTS[_k]
+            _keep = {k: v for k, v in e.settings.items() if k.startswith("X_")}
+            _fades = {k: v for k, v in e.settings.items() if k.startswith("T_")}
+            e.effect_name = _en
+            e.settings = {**_sett, **_fades, **_keep}
+            _n += 1
+        if _n:
+            print(f"Movement over flash: {_n} short flat hits became a gesture "
+                  f"on props with room to show one ({len(_strong)} strong beats "
+                  f"kept their flash so the pulse still reads)")
+        return effects
+
+    def _g_section_arc(effects):
+        """The show's brightness follows the SONG'S arc, not each section's own.
+
+        A stage-lighting read of the first Bluey build found the structural
+        flaw: the song's loudest section (89.2s, music energy 0.59) rendered at
+        light 95.9 while the FIRST chorus (18.6s, music 0.45) rendered at
+        109.3 -- the show spent its brightest card seventy seconds before the
+        song's biggest moment. One of the two builds also got BRIGHTER as the
+        music fell away (music 0.46 -> 0.20, light 63.5 -> 64.0).
+
+        Each section now takes a ceiling from where it ranks in THIS song: the
+        loudest keeps 100%, the quietest sits at 45%, and a build or break is
+        additionally held below the section before it, so it pulls the floor
+        down and gives the next drop somewhere to come from.
+
+        Only BEDS are scaled -- anything under 0.6s, anything staged for a drop
+        and anything already dark is left alone, so hits keep their punch and
+        contrast grows from the floor rather than shrinking from the top.
+        """
+        _secs = list(analysis.sections)
+        if len(_secs) < 3:
+            return effects
+        _lv = [float(section_loudness.get(i, getattr(x, "energy_level", 0.5) or 0.5))
+               for i, x in enumerate(_secs)]
+        _lo, _hi = min(_lv), max(_lv)
+        if _hi - _lo < 1e-6:
+            return effects
+        _named = SONG_CLIMAX.get(SONG_NAME) or []
+        _peak_idx = {i for i, x in enumerate(_secs)
+                     if any(x.start_time <= t < x.end_time for t in _named)}
+        _target, _prev = [], 1.0
+        for _i, _x in enumerate(_secs):
+            _n = (_lv[_i] - _lo) / (_hi - _lo)
+            # Floor raised from 0.45: at 0.45, quiet sections combined with
+            # the other contrast devices went to single-digit lit percentages.
+            _t = 0.58 + 0.42 * _n
+            # A DIP IS MEASURED, NOT LABELLED, AND IT DOES NOT CASCADE.
+            #
+            # This used to read `label in ("build", "break", "transition")`
+            # and hold the section at 0.75 of the PREVIOUS target. Both
+            # halves were wrong once the labels are unreliable, and they
+            # are: the detector calls 94 of This Version of You's 100
+            # sections "transition" and 46 of Gooey's 57. Chaining off
+            # _prev then compounds -- measured on This Version of You,
+            # EIGHTEEN consecutive sections pinned at the 0.42 floor, about
+            # a minute of song forced dark, and the song came out the
+            # dimmest in the library at mean 26.8 against ~45 elsewhere.
+            #
+            # The intent -- a lull before a lift, so the next moment has
+            # somewhere to come from -- is measurable without the label: a
+            # section that is quieter than the one before AND followed by
+            # one louder than itself. Applied to the section's OWN target
+            # so it can never compound down the song.
+            _dips = (_i > 0 and _lv[_i] < _lv[_i - 1] - 0.05
+                     and _i + 1 < len(_lv) and _lv[_i + 1] > _lv[_i] + 0.05)
+            if _dips:
+                _t = min(_t, 0.80 * (0.58 + 0.42 * _n) + 0.10)
+            if _peak_idx:
+                # A named peak takes the top, and everything else is held
+                # below it so the moment still reads as the biggest.
+                _t = 1.0 if _i in _peak_idx else min(_t, 0.85)
+            _target.append(max(0.42, min(1.0, _t)))
+            _prev = _target[-1]
+        _n_dim = 0
+        for e in effects:
+            if e.effect_name == "Off" or e.settings.get("X_Blackout") == "1":
+                continue
+            if e.end_time_ms - e.start_time_ms < 600:
+                continue
+            _t0 = e.start_time_ms / 1000.0
+            _si = next((i for i, x in enumerate(_secs)
+                        if x.start_time <= _t0 < x.end_time), None)
+            if _si is None or _target[_si] >= 0.97:
+                continue
+            _f = _target[_si]
+            _pal = e.palette
+            if _pal is None:
+                continue
+            _parts = list(_pal.extra_parts or [])
+            _vc = next((x for x in _parts
+                        if x.startswith("C_VALUECURVE_Brightness=")), None)
+            if _vc is not None:
+                _m2 = re.search(r"Values=([0-9.:;]+)", _vc)
+                if not _m2:
+                    continue
+                _pts = []
+                for _seg in _m2.group(1).split(";"):
+                    if ":" not in _seg:
+                        continue
+                    _a, _b = _seg.split(":")
+                    _pts.append(f"{float(_a):.3f}:{max(0.02, float(_b) * _f):.2f}")
+                _parts = [x for x in _parts if x is not _vc] + [
+                    _vc.split("Values=")[0] + "Values=" + ";".join(_pts)]
+            else:
+                _parts.append(
+                    "C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                    f"Type=Custom|Min=0.00|Max=400.00|RV=TRUE|"
+                    f"Values=0.000:{VC_NOMINAL * _f:.2f};1.000:{VC_NOMINAL * _f:.2f}")
+            e.palette = _pal.model_copy(update={"extra_parts": _parts})
+            _n_dim += 1
+        if _n_dim:
+            print("Section arc: " + ", ".join(
+                f"{(x.label or chr(63))}@{x.start_time:.0f}s {100 * _target[i]:.0f}%"
+                for i, x in enumerate(_secs))
+                + f" ({_n_dim} beds scaled)")
+        return effects
+
+    def _g_no_dead_props(effects):
+        """Nothing is placed on a prop Krists has switched off.
+
+        Active="0" models render nothing, so every effect on one is thrown
+        away -- but they still consume the pass that placed them and they
+        corrupt any measurement that reads the .xsq back. Measured on Aperture
+        v183: the three retired Front Window Matrices held 264 placements each
+        and made "some matrices have a shader and others don't" read as 234 of
+        240 moments when the true figure for the live canvases was 47.
+        """
+        # NB: `main` has its own local `_inactive_models` SET at the top, so the
+        # module-level helper is deliberately named without the underscore --
+        # the shadowed version failed as "'set' object is not callable", the
+        # second name collision of this kind in this file today.
+        _dead = inactive_models()
+        if not _dead:
+            return effects
+        _drop = {id(e) for e in effects if e.model_name.split("/")[0] in _dead}
+        if _drop:
+            effects = drop_effects(effects, _drop, "the prop is switched off")
+            print(f"Dead props: {len(_drop)} effects removed from "
+                  f"{len(_dead)} models Krists has set Active=0")
+        return effects
+
+    def _g_dark_after_audio(effects):
+        """Nothing is lit after the music stops.
+
+        Measured on "December": the audio goes silent at 168.1s of a 172.1s
+        file, and the house then ran at mean 95-104 against 45-55 during the
+        song -- brighter after the song than during it. The existing
+        final-dropout logic could not catch it: that needs 8 seconds of quiet
+        tail to call a dropout and there were only 4.
+
+        So this is separate and absolute -- find where the audio actually ends
+        and let nothing outlive it by more than a breath.
+        """
+        _rms = np.asarray(analysis.spectrum.rms_energy, dtype=float)
+        _rt = np.asarray(analysis.spectrum.rms_times, dtype=float)
+        if _rms.size < 10:
+            return effects
+        _live = np.flatnonzero(_rms > 0.02 * float(_rms.max()))
+        if not _live.size:
+            return effects
+        _end = float(_rt[_live[-1]])
+        if _end >= float(analysis.duration_seconds) - 0.75:
+            return effects                      # plays out to the end
+        _end_ms = int(_end * 1000)
+        _tail = _end_ms + 250                   # a breath to fade in, not a cut
+        _drop, _trim = set(), 0
+        for e in effects:
+            if e.start_time_ms >= _tail:
+                _drop.add(id(e))
+            elif e.end_time_ms > _tail:
+                e.end_time_ms = _tail
+                e.settings = {**e.settings, "T_TEXTCTRL_Fadeout": "0.25"}
+                _trim += 1
+        if _drop:
+            effects = drop_effects(effects, _drop, "after the audio ends")
+        print(f"Dark after audio: music ends at {_end:.1f}s of "
+              f"{float(analysis.duration_seconds):.1f}s -- {len(_drop)} effects "
+              f"removed, {_trim} trimmed to it")
+        return effects
+
+    def _g_pinned_section_shaders(effects):
+        """A pinned section shader is the shader for that section, everywhere.
+
+        "Specific groups of effects or shaders to set in specific sections so
+        it's less random and more thoughtful."
+
+        Pinning the section's SHARED hero choice was not enough: six other
+        passes roll a shader of their own (the drop-cycle look, the section and
+        drop markers, the bare-canvas fill, the ambient hold, and each canvas's
+        own roll). Measured on the first pinned Bluey build, sections asking
+        for Iso Blocks or Smoke Drift also carried Corduroy, Ink Bloom, Bokeh
+        Drift, Ribbon Braid and Wind Wheat. Rewriting here, after every pass
+        has run, is the only place the pin can actually hold -- and it keeps
+        the cohesion goal of one texture across the house at a time.
+
+        Palette, timing, fades and provenance are preserved; only the shader
+        identity and its own parameters change. Ambient-slowed variants are
+        left alone: their speed is the point.
+        """
+        _pins = SONG_SECTION_LOOK.get(SONG_NAME) or {}
+        _pinned = {t: v["shader"] for t, v in _pins.items() if v.get("shader")}
+        if not _pinned:
+            return effects
+        _times = sorted(_pinned)
+
+        def _want(ms):
+            _t = ms / 1000.0
+            _c = [x for x in _times if x <= _t + 0.25]
+            return _pinned[_c[-1]] if _c else None
+
+        _big = {"Mega Tree", "Garage Roof", "Tunnel Matrix Real"}
+        _n = 0
+        for e in effects:
+            if e.effect_name != "Shader":
+                continue
+            _nm = e.model_name
+            if not (_nm in _big or "matrix" in _nm.lower()):
+                continue
+            if e.settings.get("X_AmbientSlowed") == "1":
+                continue
+            _k = _want(e.start_time_ms)
+            if not _k or _k not in EFFECTS:
+                continue
+            _en, _sett = EFFECTS[_k]
+            if e.settings.get("E_0FILEPICKERCTRL_IFS") == _sett.get("E_0FILEPICKERCTRL_IFS"):
+                continue
+            _keep = {k: v for k, v in e.settings.items()
+                     if k.startswith(("X_", "T_", "B_"))}
+            e.effect_name = _en
+            e.settings = {**_sett, **_keep}
+            _n += 1
+        if _n:
+            print(f"Section shaders: {_n} rewritten to the section's pinned "
+                  f"shader across the big canvases")
+        return effects
+
+    def _g_no_strobe_on_tiny_props(effects):
+        # A SHADER ON A ONE-NODE PROP IS A STROBE, NOT A TEXTURE.
+        #
+        # "At 1:04 in Gooey the orbs are strobing like crazy for a solid 5
+        # seconds or more, let's never do that."
+        #
+        # Measured: 9.5 on/off transitions per second on the Orbs across that
+        # window, from a Shader at E_SLIDER_Shader_Speed=285. The Orbs are
+        # ONE NODE each. A shader has no pixels to draw a pattern across on a
+        # single node, so every frame collapses to one flat colour and the
+        # shader's animation rate becomes the flash rate directly -- the
+        # faster and better the shader, the worse the strobe. The floods are
+        # one node too, and the small decorative props only a handful.
+        #
+        # Anything without real spatial extent gets its shader speed pinned to
+        # a drift. This is a hard ceiling, not a scale factor, because a
+        # scale factor still leaves the fastest shaders fast.
+        try:
+            _cm = json.loads((SHOW_PATH / ".generation" /
+                              "channel_map.json").read_text())["models"]
+        except Exception as _e:
+            print(f"  (tiny-prop strobe guard skipped: {_e})")
+            return effects
+        _nodes = {k: v.get("count", 0) // 3 for k, v in _cm.items()}
+
+        # Group membership has to be expanded RECURSIVELY from the layout.
+        # FLASH_SPLIT alone missed it: the strobing effects were placed on the
+        # "Orbs" GROUP, which is not a model, so the first version of this
+        # guard found no size for them and changed nothing at all.
+        _grp = layout.get("xlights_model_groups", {}) or {}
+
+        def _members(name, _seen=None):
+            _seen = _seen or set()
+            if name in _nodes:
+                return {name}
+            _out = set()
+            for _m in _grp.get(name, []):
+                if _m in _seen:
+                    continue
+                _seen.add(_m)
+                _out |= _members(_m, _seen)
+            return _out
+
+        def _size(name):
+            """Nodes on this target -- for a group, its SMALLEST member, since
+            a group effect renders onto every one of them and the strobe is
+            whatever the worst-off prop does."""
+            _sz = [_nodes[m] for m in _members(name) if m in _nodes]
+            return min(_sz) if _sz else None
+
+        _TINY, _SMALL = 8, 64
+        _fixed = 0
+        for e in effects:
+            _sp = e.settings.get("E_SLIDER_Shader_Speed")
+            if _sp is None:
+                continue
+            _n = _size(e.model_name)
+            if _n is None:
+                continue
+            _ceil = 25 if _n <= _TINY else (110 if _n <= _SMALL else None)
+            if _ceil is not None and int(_sp) > _ceil:
+                e.settings = {**e.settings,
+                              "E_SLIDER_Shader_Speed": str(_ceil)}
+                _fixed += 1
+        if _fixed:
+            print(f"No strobe on tiny props: {_fixed} shaders slowed to a "
+                  f"drift on props with too few nodes to show a pattern")
+        return effects
+
+    def _g_spheres_rhythmic(effects):
+        # THE SPHERES HIT, THEY DO NOT GLOW.
+        #
+        # "Okay I see some more effects on the spheres but they're still not
+        # very rhythmic mostly... they could show up/down rhythmic motion
+        # similar to how the verticals do."
+        #
+        # Measured against the verticals in the same render, which he holds up
+        # as the thing that reads right:
+        #
+        #     verticals   316 effects  median  225ms  lit 0.3x the song
+        #     spheres    1337 effects  median  975ms  lit 7.9x the song
+        #
+        # So the spheres were lit essentially all the time, in second-long
+        # effects stacked several deep. Nothing about the effect VOCABULARY was
+        # the problem -- adding more looks to the pool could never have fixed
+        # this, and measurably did not. What makes a prop rhythmic is the gap:
+        # a beat only reads as a beat if the prop was dark just before it. One
+        # beat is the cap, so every sphere effect finishes inside its own beat
+        # and the next hit starts from black.
+        # THE SPHERES BELONG TO THE RHYTHM PASS.
+        #
+        # Trimming the bed around each hit was not enough -- measured, only 9%
+        # of hits lit solely the intended half, and 1.88 spheres lit per hit
+        # that were meant to be dark, because the bed fires on the same beats
+        # the bass does and simply refilled the gaps. The up/down chase was
+        # diluted the same way: it renders a clean 30-node slide in isolation
+        # and measured 1.0 nodes in the song, because two or three other
+        # effects were lit on the same sphere at the same time and the eye
+        # (and the measurement) sees their sum.
+        #
+        # So on the spheres the bed goes entirely. What is left: the rhythm
+        # pass, the melody on L_SIG, and whatever an ambient passage placed --
+        # ambient sections have their own slow vocabulary and no beat to hit.
+        if _sph_hits:
+            _sph_names = {m for m in positions if "hanging sphere" in m.lower()}
+            _drop = set()
+            for e in effects:
+                if e.layer >= L_SIG:
+                    continue
+                if e.model_name not in _sph_names \
+                        and e.model_name != "Hanging Spheres":
+                    continue
+                if e.settings.get("X_Sphere") in ("1", "run"):
+                    continue                      # a rhythm placement
+                if in_ambient(e.start_time_ms / 1000.0):
+                    continue                      # ambient has its own rules
+                _drop.add(id(e))
+            if _drop:
+                effects = drop_effects(effects, _drop,
+                                       "sphere bed (rhythm pass owns the spheres)")
+                print(f"Spheres: {len(_drop)} bed effects removed so the beat "
+                      f"reads -- the rhythm pass owns these props")
+        _own = 0
+        if False:
+            _sph_names = {m for m in positions if "hanging sphere" in m.lower()}
+            _grp = {"Hanging Spheres"}
+            for e in effects:
+                if e.layer >= L_SIG:
+                    continue
+                _is_grp = e.model_name in _grp
+                if not _is_grp and e.model_name not in _sph_names:
+                    continue
+                for _h in _sph_hits:
+                    if e.start_time_ms >= _h["end"] or e.end_time_ms <= _h["start"]:
+                        continue
+                    # The hit's own placements start exactly on the hit.
+                    if (not _is_grp and e.model_name in _h["on"]
+                            and e.start_time_ms == _h["start"]):
+                        continue
+                    if e.start_time_ms < _h["start"]:
+                        e.end_time_ms = _h["start"]
+                    else:
+                        e.start_time_ms = _h["end"]
+                    _own += 1
+                    break
+            if _own:
+                print(f"Spheres: {_own} bed effects moved out of the way of a "
+                      f"sphere hit, so only the firing half lights")
+        _cap = max(250, int(beat_ms))
+        _sph = {m for m in FLASH_SPLIT.get("Hanging Spheres", [])} | \
+               {"Hanging Spheres"} | \
+               {e.model_name for e in effects
+                if "hanging sphere" in e.model_name.lower()}
+        _n = 0
+        for e in effects:
+            # The melody lives on L_SIG and sets its own length -- a note is
+            # already as long as the note is.
+            if e.layer >= L_SIG or e.model_name not in _sph:
+                continue
+            # The two-bar motion runs are exempt: capping them to one beat is
+            # exactly the "way too fast and only happens one-off" behaviour
+            # this pass exists to replace.
+            if e.settings.get("X_Sphere") == "run":
+                continue
+            if e.end_time_ms - e.start_time_ms > _cap:
+                e.end_time_ms = e.start_time_ms + _cap
+                _n += 1
+        if _n:
+            print(f"Spheres rhythmic: {_n} effects capped to one beat "
+                  f"({_cap}ms) so each hit starts from black")
+        return effects
+
+    def _g_melody_solo(effects):
+        # A MELODY NEEDS SILENCE AROUND IT.
+        #
+        # "There are seven of them which is essentially a full octave, you
+        # could use them to play a slow melody... it could look great on
+        # those" -- and then, after they were placed: "I haven't seen them
+        # show any melodies yet, is that working?"
+        #
+        # It WAS working, and that was the trap. The pitch mapping measured
+        # correct in the render (degree 3 -> sphere 2, degree 4 -> sphere 3),
+        # the notes were on the top layer, and none of it could be seen,
+        # because everything else was ALSO lit: a median of 46 of the seven
+        # spheres' 56 strands were on at any beat. A melody is legible only as
+        # a light MOVING against something darker, so for the length of a
+        # phrase the props that are playing it stop doing anything else. The
+        # notes are on L_SIG, so clearing the layers below leaves the phrase
+        # alone on those props and nothing else changes anywhere in the house.
+        if not _mel_windows:
+            return effects
+        # Group the notes back into phrases and keep only the substantial
+        # ones. Clearing the bed for a single stray note would punch a hole in
+        # the house for no visible gain.
+        _by_ph: dict[int, list[dict]] = {}
+        for _w in _mel_windows:
+            _by_ph.setdefault(_w["ph"], []).append(_w)
+        _spans = []
+        for _ph, _ws in _by_ph.items():
+            if len(_ws) < 3:
+                continue
+            _s, _e = min(w["start"] for w in _ws), max(w["end"] for w in _ws)
+            if _e - _s < 1500:
+                continue
+            _props = set()
+            for _w in _ws:
+                _props.update(_w["members"])
+            # A short lead-in keeps the bed from re-lighting a frame before the
+            # first note and stepping on the entrance.
+            _spans.append((_s - 200, _e + 200, _props))
+        if not _spans:
+            return effects
+        _kill, _trimmed = set(), 0
+        for e in effects:
+            if e.layer >= L_SIG or e.model_name not in {
+                    p for _, _, ps in _spans for p in ps}:
+                continue
+            for _s, _e, _props in _spans:
+                if e.model_name not in _props:
+                    continue
+                if e.start_time_ms >= _e or e.end_time_ms <= _s:
+                    continue
+                if e.start_time_ms >= _s and e.end_time_ms <= _e:
+                    _kill.add(id(e))               # wholly inside the phrase
+                elif e.start_time_ms < _s:
+                    e.end_time_ms = _s             # ends as the phrase starts
+                    _trimmed += 1
+                else:
+                    e.start_time_ms = _e           # resumes after it
+                    _trimmed += 1
+                break
+        if _kill:
+            effects = drop_effects(effects, _kill, "cleared for a melody phrase")
+        print(f"Melody solo: {len(_spans)} phrases given the props to "
+              f"themselves ({len(_kill)} effects cleared, {_trimmed} trimmed)")
+        return effects
+
     def _g_replace_on_drop(effects):
         # A SHADER CHANGE ON A DROP IS A REPLACEMENT, NOT AN ADDITION.
         #
@@ -10433,10 +13949,41 @@ def main():
         ("tie repeating motion to the beat grid", _g_beat_lock_motion),
         ("floods carry flat light only", _g_floods_flat),
         ("no solid slab on a textured matrix", _g_no_slab),
+        ("hero props do not sit dark", _g_hero_prop_not_dark),
+        ("no diagonal wash across a radial prop", _g_no_diagonal_wash_on_radial),
+        ("the tunnel never flashes whole", _g_no_whole_tunnel_flash),
+        ("pinned section shaders hold everywhere", _g_pinned_section_shaders),
+        ("no strobe on props with no spatial extent", _g_no_strobe_on_tiny_props),
+        ("spheres hit rather than glow", _g_spheres_rhythmic),
+        ("a melody phrase plays alone on its props", _g_melody_solo),
         ("drop sliver effects", _g_slivers),
         ("shader change on a drop is a replacement", _g_replace_on_drop),
         ("resolve same-layer overlaps", _g_layer_overlaps),
         ("pulse-rate ceiling on the curves", _g_pulse_ceiling),
+        ("matrix shaders move with the bar", _g_matrix_beat_shaders),
+        ("a big bar sweeps the matrices", _g_matrix_bars),
+        ("prop families take turns resting", _g_rest_rotation),
+        ("no section is twice as busy as its neighbours", _g_pace_movement),
+        ("a section reads as one colour", _g_section_colour),
+        ("movement instead of a flat flash", _g_movement_over_flash),
+        # AFTER the flashes become gestures: that pass is itself the biggest
+        # producer of centre-bursts on the arches, so running the leap before
+        # it converted only 2 of them.
+        # Fours BEFORE the leap shaper, so the new group-level chases get the
+        # same direction/dot treatment as everything else on the arches.
+        ("the arches chase across the row on the fours", _g_arch_fours),
+        ("the arches are never half-lit by a house bed", _g_arches_clean),
+        ("every matrix shows the same thing", _g_matrix_unison),
+        ("the arches leap again", _g_arch_leap),
+        ("the show follows the arc of the song", _g_section_arc),
+        ("nothing placed on a switched-off prop", _g_no_dead_props),
+        ("nothing lit after the music stops", _g_dark_after_audio),
+        # LAST. `_g_replace_on_drop` deliberately runs the OUTGOING shader all
+        # the way to the drop, which re-extends anything the blackout trimmed:
+        # placed mid-list, this guard cut the two shaders off the Mega Tree and
+        # they were both back, 102150-121440, by the time the file was written.
+        # The blackout has to be the final word on those props.
+        ("the run-up blackout really goes dark", _g_drop_blackout_is_real),
     ]
     for _gname, _gfn in LATE_GUARDS:
         _before = len(effects)
@@ -10479,6 +14026,13 @@ def main():
                                         for t in SNAPPED_DROPS)),
             "section_starts": [round(float(sec.start_time), 3)
                                for sec in analysis.sections],
+            # The sphere rhythm's hits and which half each one fires, so the
+            # split can be verified in the render instead of guessed at from
+            # beat times (most beats carry no sphere hit, and measuring at
+            # every beat averages the split away).
+            "sphere_looks": _sph_looks,
+            "sphere_hits": [{"t": round(h["start"] / 1000.0, 3),
+                             "on": sorted(h["on"])} for h in _sph_hits],
             "guards": GUARD_LOG,
             "removals": [{**_r, "from_passes": {
                 _pass_label(int(_k), _srclines): _v
