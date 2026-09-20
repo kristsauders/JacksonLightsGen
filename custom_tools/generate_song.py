@@ -1887,6 +1887,143 @@ PULSE_MODE_OVERRIDE: dict[str, str] = {
 #
 # Section indices refer to SONG_SECTIONS order for songs that define it.
 SONG_SECTIONS: dict[str, list[tuple[float, str]]] = {
+    # =========================================================================
+    # HAND-READ GRIDS. Every entry below was read off section_plan.py's
+    # four-bar phrase map, and every boundary is an exact bar line. The
+    # detector's own output is quoted where it was wrong, so the reason for
+    # overriding it is on the record.
+    #
+    # What the audio says, song by song -- bass IN/OUT is the drop and the
+    # breakdown, hats IN/OUT is the lift inside an otherwise flat section.
+    # =========================================================================
+    # World Is Mine: drop at 95.55 (bass 0.13->1.82), break at 124.81, the
+    # house empties at 126.76 (e 0.14), rebuild from 171.62, pre-drop hush at
+    # 214.53 (bass OUT), second drop 218.43. Detector: 17 sections, cv 0.17 --
+    # an invented uniform grid.
+    "World Is Mine": [
+        (1.93, "intro"), (50.69, "build"), (54.59, "verse"), (70.20, "verse"),
+        (95.55, "chorus"), (124.81, "break"), (126.76, "break"),
+        (171.62, "build"), (193.08, "build"), (208.68, "build"),
+        (214.53, "build"), (218.43, "chorus"), (247.69, "chorus"),
+        (278.90, "outro"),
+    ],
+    # Corners of the Earth: bass enters 33.11 and stays; the song is carried by
+    # hat density until the real lift at 165.74 (e 0.51->0.64). Long climax, so
+    # one interior boundary at 206.70 for variety. Bass leaves at 259.36.
+    "Corners of the Earth": [
+        (1.90, "intro"), (33.11, "verse"), (56.51, "verse"), (64.32, "build"),
+        (79.92, "chorus"), (87.72, "verse"), (95.52, "chorus"),
+        (118.93, "verse"), (165.74, "chorus"), (206.70, "chorus"),
+        (251.56, "outro"), (259.36, "outro"), (282.77, "outro"),
+    ],
+    # Cruise: two clean drops -- 42.55 and 91.59 -- each preceded by a bass-out
+    # bar (34.37, 83.41). Big breakdown 124.28, final drop 140.63.
+    "Cruise": [
+        (1.68, "intro"), (9.85, "verse"), (26.20, "build"), (34.37, "break"),
+        (42.55, "chorus"), (58.89, "verse"), (83.41, "break"),
+        (91.59, "chorus"), (124.28, "break"), (140.63, "chorus"),
+        (165.15, "outro"),
+    ],
+    # ENIGMA: slow (95.7 BPM). Drop at 30.11 (bass 0.13->1.55), breakdown 70.24,
+    # second drop 90.30, long break from 130.42, final lift 170.55.
+    "ENIGMA": [
+        (0.02, "intro"), (10.05, "intro"), (30.11, "chorus"), (40.14, "chorus"),
+        (70.24, "break"), (80.27, "build"), (90.30, "chorus"),
+        (100.33, "chorus"), (130.42, "break"), (170.55, "chorus"),
+    ],
+    # Fara: drop 30.18, the song thins from 74.76 and empties at 89.62
+    # (e 0.12) -- a real hole, not a mistake -- then rebuilds 104.49 / 111.92
+    # into the second drop at 134.21.
+    "Fara": [
+        (0.46, "intro"), (30.18, "chorus"), (74.76, "verse"), (82.19, "break"),
+        (89.62, "break"), (104.49, "build"), (111.92, "build"),
+        (134.21, "chorus"), (163.93, "outro"),
+    ],
+    # Gooey: 86 BPM, very few real turns. Detector: 57 sections, median 1.2s --
+    # fragments. The music has four: in at 57.73, bass thins 124.60, breakdown
+    # 146.89, final lift 180.33.
+    "Gooey": [
+        (2.00, "intro"), (57.73, "chorus"), (124.60, "verse"),
+        (146.89, "break"), (180.33, "chorus"),
+    ],
+    # Harmony: long build -- 10.50, 18.68, 67.72, 84.06 -- into the first big
+    # drop at 92.24 (bass 0.87->1.63). Breakdown 133.10/141.28, second drop
+    # 157.63, third 198.49 after a hats-only riser at 190.32.
+    "Harmony (Axel Thesleff Remix)": [
+        (2.33, "intro"), (10.50, "intro"), (18.68, "verse"), (67.72, "build"),
+        (75.89, "break"), (84.06, "build"), (92.24, "chorus"),
+        (124.93, "chorus"), (133.10, "break"), (141.28, "break"),
+        (149.45, "build"), (157.63, "chorus"), (173.97, "verse"),
+        (182.15, "break"), (190.32, "build"), (198.49, "chorus"),
+        (280.23, "outro"), (288.40, "outro"),
+    ],
+    # Meridian: 89 BPM. Drop 21.66, break 43.21, drop 64.75, break 107.85,
+    # drop 118.62, long break 150.95 with hats climbing (161.72, 172.49) into
+    # the final drop at 183.27.
+    "Meridian": [
+        (0.11, "intro"), (10.88, "build"), (21.66, "chorus"), (43.21, "break"),
+        (64.75, "chorus"), (75.53, "chorus"), (107.85, "break"),
+        (118.62, "chorus"), (129.40, "chorus"), (150.95, "break"),
+        (161.72, "build"), (172.49, "build"), (183.27, "chorus"),
+        (204.82, "chorus"), (226.37, "outro"),
+    ],
+    # Ojai: one long rise to 65.40, a settle at 106.26, the hats leave at
+    # 114.44 and return at 130.78 into the main drop at 138.96.
+    "Ojai": [
+        (0.01, "intro"), (8.18, "verse"), (65.40, "chorus"), (106.26, "verse"),
+        (114.44, "break"), (130.78, "build"), (138.96, "chorus"),
+        (179.83, "outro"),
+    ],
+    # So Easy: 143.6 BPM, fast. Steady climb 6.92 / 33.67 / 60.42 / 73.79,
+    # dip at 107.23, lift 113.91, breakdown 140.66, final drop 154.04.
+    "So Easy (To Fall in Love)": [
+        (0.23, "intro"), (6.92, "verse"), (33.67, "build"), (60.42, "chorus"),
+        (73.79, "chorus"), (107.23, "verse"), (113.91, "chorus"),
+        (140.66, "break"), (147.35, "build"), (154.04, "chorus"),
+        (160.73, "outro"),
+    ],
+    # The Last Goodbye: 359s, the longest. Detector: 52 sections, median 2.0s.
+    # Real shape: in at 16.37, bass at 65.41, first big lift 81.75, thins at
+    # 147.14 and empties at 155.32 (bass 0.04), rebuild 163.49/171.66, and a
+    # second peak at 294.26 before the long fade from 318.78.
+    "The Last Goodbye": [
+        (0.02, "intro"), (16.37, "verse"), (65.41, "build"), (81.75, "chorus"),
+        (147.14, "verse"), (155.32, "break"), (163.49, "build"),
+        (171.66, "chorus"), (237.05, "chorus"), (286.09, "chorus"),
+        (294.26, "chorus"), (318.78, "outro"), (335.13, "outro"),
+        (343.30, "outro"),
+    ],
+    # This Version of You: detector returned 100 sections, median 1.2s, 94 of
+    # them labelled "transition" -- the worst case in the library and the one
+    # that pinned 18 consecutive sections at the arc floor. The music is a
+    # single long crescendo: 12.73, 27.59, 64.74, then the drop at 72.17 and a
+    # second stage at 79.60, hats layering at 109.33 and 124.19, and it stops
+    # dead at 153.91.
+    "This Version of You": [
+        (5.30, "intro"), (12.73, "intro"), (27.59, "verse"), (64.74, "build"),
+        (72.17, "chorus"), (79.60, "chorus"), (109.33, "chorus"),
+        (124.19, "chorus"), (153.91, "outro"),
+    ],
+    # Too Slow: starts already running (bass 1.32 in bar 0). Break 24.90, drop
+    # 32.33, thins 62.05/84.34, lift 91.77, empties 106.64 (bass 0.01), final
+    # drop 121.50.
+    "Too Slow (All Night)": [
+        (2.61, "chorus"), (24.90, "break"), (32.33, "chorus"), (62.05, "verse"),
+        (84.34, "verse"), (91.77, "chorus"), (99.21, "break"),
+        (106.64, "break"), (121.50, "chorus"), (151.22, "outro"),
+    ],
+    # The WhatsApp Shakespeare: a call-and-response song -- bass drops OUT
+    # completely four times (45.94, 75.66, 112.82, 157.40) and slams back in.
+    # Those holes ARE the structure; every one is a boundary.
+    "The WhatsApp Shakespeare": [
+        (1.36, "intro"), (8.79, "verse"), (31.08, "chorus"), (45.94, "break"),
+        (60.80, "chorus"), (75.66, "break"), (83.09, "chorus"),
+        (90.52, "verse"), (97.96, "chorus"), (105.39, "break"),
+        (112.82, "break"), (120.25, "build"), (127.68, "chorus"),
+        (149.97, "verse"), (157.40, "break"), (164.83, "build"),
+        (172.26, "chorus"), (187.12, "verse"), (194.55, "break"),
+        (201.98, "build"), (209.41, "chorus"), (224.27, "outro"),
+    ],
     # --- Aperture ------------------------------------------------------------
     # Read off the bar grid with song_map.py (bar = 1.858s, first downbeat
     # 0.13s). Every boundary below is an exact bar line.

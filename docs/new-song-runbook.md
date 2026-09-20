@@ -140,6 +140,90 @@ one came from "December", whose 85.34s build differs from the verse before it by
 0.02 energy — the marking guard's energy test skipped it and `verify_sections`
 reported the boundary as passing with nothing changing.
 
+## 3b. HAND-MAP THE SECTIONS. Always. This is not optional.
+
+The single highest-value half-hour you can spend on a new song. The structure
+detector is good at finding THAT something changed and **bad at finding when**,
+and on a uniform song it invents boundaries that do not exist at all. Measured
+across the 2026 library:
+
+| song | detector said | reality |
+|---|---|---|
+| Aperture | 19 sections, **every one ~16.0s** | uniform grid; bars 65-148 never change |
+| 12 to 12 | 20 sections | 4 real events; five 1-second fragments AFTER the audio ends |
+| This Version of You | **100 sections**, median 1.2s, 94 called "transition" | one long crescendo |
+| The Last Goodbye | 52 sections, median 2.0s | ~14 real turns |
+| Gooey | 57 sections, median 1.2s | 5 real turns |
+
+A look change at an invented boundary cannot be "on time" -- there is no event
+for it to be on. Krists hears this as "the looks change a few beats early".
+
+### The tool
+
+    python custom_tools/section_plan.py "<song>"
+
+It prints, per **four-bar phrase**, only the bar lines where total energy, bass
+or hats actually turn -- plus the drop cues and the detector's own verdict.
+(Four bars, not one: a hi-hat that drops out every other bar is texture, and a
+bar-by-bar reading of Corners of the Earth reported forty "hats IN/OUT" turns,
+none of them structural.) Use `song_map.py` when you want to study one passage
+bar by bar; use `section_plan.py` to plan the grid.
+
+### How to read it, as a songwriter
+
+* **bass IN** is the drop. **bass OUT** is the breakdown. These are the two
+  strongest boundaries in almost every song here, and they are unambiguous --
+  0.13 -> 1.82 on World Is Mine at 95.55s.
+* **hats IN/OUT** marks the lift *inside* an otherwise flat section. Aperture
+  is one long 0.55-energy plateau; the hats entering at 74.43 and leaving at
+  276.91 are the only interior structure it has, and they matter.
+* **energy alone** moves last and least. Do not lead with it.
+* **A long run with no change point is ONE section**, however many the detector
+  claims. Corners of the Earth holds from 165.74 to 251.56 -- that is a single
+  86-second climax, not five choruses.
+* **Cross-check the drop cues.** A boundary within ~0.5s of a cue is the same
+  event; take the bar line, not the cue time.
+* Songs that start already running get no intro (Too Slow's bar 0 has bass
+  1.32). Songs that stop dead get a boundary where they stop.
+* Search the web for the track when the structure is ambiguous -- an official
+  breakdown of verse/chorus/bridge positions resolves a judgement call fast.
+  It is worth doing for anything with lyrics.
+
+### Writing it down
+
+Every boundary is a **bar line time from the map**, pasted into `SONG_SECTIONS`
+with a label. Labels are free text and only need to be consistent within the
+song -- the generator no longer keys behaviour off them (see below).
+
+Put the evidence in a comment above the entry: which bars turned and why. Six
+months from now the reason for overriding the detector must still be legible.
+
+### Why labels stopped mattering
+
+The detector reuses one name for most of a song. Three passes keyed off that
+name and all three misbehaved:
+
+* `_g_section_arc` held any "build"/"break"/"transition" at 75% of the previous
+  section -- with 94 consecutive "transition" labels that cascaded to the floor
+  and pinned **18 consecutive sections at 42%**, about a minute of dark.
+* `escalation` counted repeats of the label, so it hit maximum at section three
+  and stayed pinned -- the opposite of a build.
+* melody detection took "the chorus sections" literally: most of Aperture, or
+  an arbitrary 5 of Gooey's 57.
+
+All three now measure instead (a dip is quieter-than-before-and-followed-by-
+louder; escalation buckets the energy; melody takes the loudest third). **If
+you add a pass, do not branch on `section.label`.**
+
+### What good looks like
+
+After hand-mapping, verify:
+
+* boundaries **100% on a beat** (they are bar lines, so they should be);
+* **most boundaries carry a look change** -- Aperture went 7/20 -> 15/17.
+  Boundaries inside drop staging are expected to have none; the blackout is
+  the change.
+
 ## 4. Name the drops and the important moments
 
 `cues.json` offers far more candidates than a show should stage, ranked by local
