@@ -695,3 +695,131 @@ will read subtly. Confirm with a per-section pin probe before believing
   asking "what is lighting this prop".
 - Refresh `channel_map` (and re-render) after any layout change, or pixel
   measurements silently read the wrong prop.
+
+## 9. A DJ MIX as one sequence (the medley path, Jackson Lights 2026)
+
+A 28:49 continuous mix of fifteen songs cannot be generated as one "song": the
+generator assumes one tempo (dozens of passes use a single median beat), and the
+mix ramps tempo between songs. So each song is cut out with +-10 s of padding,
+sequenced on its own terms, and stitched back.
+
+```bash
+# 1. whole-mix beat + downbeat grid (madmom joint DBN, follows tempo ramps)
+.venv/bin/python3 custom_tools/medley_identify.py "<mix>" beats
+# 2. identify songs: Shazam every 10 s + Whisper lyrics; ask the owner for
+#    the ones Shazam cannot name (remixes, instrumentals, unreleased edits)
+uv run --python 3.12 --with shazamio python custom_tools/medley_identify.py "<mix>" shazam
+uv run --with openai-whisper python custom_tools/medley_identify.py "<mix>" lyrics
+# 3. cut points inside each crossfade, on a downbeat -> segments.json
+#    (name, artist, start, end, audio_start, audio_end, song=".jl26/<name>")
+# 4. per-song analysis + cues on each padded slice, then the mix grid:
+.venv/bin/python3 custom_tools/medley_prep.py "<mix>" beats
+# 5. read each song's structure IN MIX TIME, write the design file
+#    custom_tools/medleys/<slug>.py (sections, looks, palettes, shader pool,
+#    drops, climax, ambient, caps, reveal, outro), then put it on the beat:
+.venv/bin/python3 custom_tools/refine_boundaries.py "<mix>" ["NN "]   # look first
+.venv/bin/python3 custom_tools/refine_boundaries.py "<mix>" ["NN "] --write
+.venv/bin/python3 custom_tools/medley_prep.py "<mix>" design
+# 6. generate every song (each writes its own xsq; ~10 s - 3 min each)
+.venv/bin/python3 custom_tools/generate_song.py ".jl26/<NN name>" --out ".../xsq/<NN name>.xsq"
+# 7. stitch, render (~20 min for 29 min of show), measure
+.venv/bin/python3 custom_tools/merge_medley.py "<mix>" --out "<show>/<mix> (vN).xsq"
+/Applications/xLights.app/Contents/MacOS/xLights -s "<show>" -r "<show>/<mix> (vN).xsq"
+.venv/bin/python3 custom_tools/measure_medley.py "<mix>" "<mix> (vN)"
+```
+
+To check one song's change without a 20-minute render, render that song's
+own segment xsq (copied into the show folder) -- about 2 minutes -- and read
+it at song time (mix time minus `audio_start`).
+
+What the design file controls, per song (all times in MIX time, converted by
+medley_prep): `sections`, `section_look` (palette + shader per section start),
+`palettes` (the song's own colours), `palette_family`, `shader_pool` (the
+shaders random picks may use -- split so NO shader is used by two songs),
+`drops`, `climax` (name the section START; prep puts it 1 s inside), `ambient`,
+`caps` (brightness range over a window: the warm-up at 10-20 %, the organ at
+30-50 %), `reveal` (exact hits, break, drop, two contrasting colours split by
+side of the house), `outro` (`no_flash_from`, `fade`), `groove`/`pulse_mode`.
+
+Lessons, each measured on this mix:
+
+- **Drops and ambient come ONLY from the design in a medley.** Left to the
+  detectors, the drumless Nils Frahm opener got a staged whole-house white hit
+  at 0:01.9. An omitted `drops` is now an empty list.
+- **Hand-set drops are not re-snapped in a medley.** The generator's kick snap
+  (first strong hit up to 2-3.5 s later) moved 6 of 21 verified drops a beat or
+  two late -- the launch reveal by +1.16 s. It was right on 4 (Bluey x2, greedy,
+  Light Of Day), so those were corrected in the design instead. Check a drop by
+  looking at the low band at 0.1 s resolution around it (a sparkline per drop
+  is enough), not by trusting any one detector.
+- **Find a precise hit pattern on the drum stem, not the full mix.** The six
+  reveal hits of Be With You (2:58.160 ... 2:59.288, 0.225 s apart) and the
+  syncopated drop at 2:59.732 only resolved on a demucs `--two-stems drums`
+  render of a 20 s slice; every full-mix detector smeared them.
+- **The bar maps used to drift.** song_map/section_plan laid a uniform grid at
+  4 x median beat; madmom's 10 ms frames quantize that median (480 ms for a
+  486 ms beat) and by bar 40 the grid was more than a beat off. Both now read
+  bar lines off the tracked downbeats (`bar_lines()`); medley_prep's tempo is
+  the mean of the gaps within 8 % of the median (a line fit read Be With You's
+  slow organ intro as 113.5 BPM).
+- **The tracked downbeat phase is NOT reliable through a mix**, so do not snap
+  boundaries to downbeats blindly: inside greedy the nearest "downbeat" sat two
+  beats either side of the real turns. `refine_boundaries.py` tests every beat
+  within +-1.3 s and moves a time only when one beat is decisively the turn
+  (linear level difference over a bar each side). A log ratio over two beats
+  was tried first and preferred the end of a SILENCE over the drop after it.
+- **Keep the per-song beat grid from the whole mix.** The per-slice analysis
+  takes beats from librosa's single global tempo and downbeats from madmom,
+  independently -- on a DJ slice librosa read Bluey at 172 BPM.
+- **A medley's tempo also changes INSIDE a song**: the last bars of Aperture
+  stretch from 1.87 s to 2.04 s as it hands over to Light Of Day.
+- **Nested song names need a stems symlink** (`stems/.jl26 -> .jl26/stems`):
+  the separator writes beside the audio, the consumers read `stems/<song>`.
+- **Shader pools narrow random picks only**; pinned looks are validated against
+  every registered shader (`ALL_SHADER_KEYS`), or one song's pool rejects
+  another song's pin.
+- **A guard that removes effects and then adds some must remove IN PLACE.**
+  `add()` appends to the generator's own list (a closure), not to the guard's
+  `effects` parameter. The reveal guard did `effects = drop_effects(...)` and
+  then placed 570 hits, the break and the drop hit -- the log counted them, the
+  render measured **0% lit on all six hits**. Use `effects[:] = drop_effects(...)`.
+  (A scan of every `_g_` guard found no other instance.)
+- **End-of-song behaviour fires on the LAST song of a mix.** The final dropout
+  saw the last drum hit at 27:09 and cleared 1,856 effects, so the strings
+  outro ran on 18 dim outlines; dark-after-audio then cut the fade short. A
+  song with a designed `outro` now ends the way the design says.
+- **Never put a look change on the first frame of a fade.** It measured as a
+  dip (lit 20% -> 4% -> 9%) while the new beds faded in.
+- **Measure the render, not the log.** The log said "570 placements" for the
+  reveal; only the .fseq showed they were gone. `custom_tools/measure_medley.py`
+  checks every promise of the design (per-song lit/level/movement, each
+  brightness cap, every reveal hit with its colours, outro flashes and the fade)
+  and streams the multi-GB render through `fseq_stream.py`. A 29-minute render
+  takes ~20 minutes and ~5-6 GB of xLights memory.
+- **Pick each section's shader by MEASURED brightness.** A shader's own
+  content sets how bright a section reads far more than the brightness curve:
+  on the first full render nine songs had a chorus or drop dimmer than the
+  verse or break beside it, and the launch chorus sat at 0.37 on a dark-sky
+  shader while an ordinary chorus reached 0.54. `measure_medley.py` prints
+  every section's display mean with its shader and flags a chorus/drop that
+  reads dimmer than the song's quiet sections (`!`). Brightness also depends
+  on the section, not only the shader -- re-measure after re-pinning.
+- **A whole-house hit on the big canvases must not be a flash.** `add()`
+  turns a flat hit on any prop too big to flash into a travelling burst, so
+  the reveal's six hits lit the Mega Tree 12%. Six full-canvas swaps in 1.1 s
+  would be the strobe that rule exists for; instead the big canvases FILL a
+  sixth per hit (Fill, fixed position, held) and land the drop as a swell
+  (fade-out >= 0.8 s, which the rule allows). Measured: 45 -> 94% of the
+  house lit across the six hits, 95.5% on the drop, gold and blue both present.
+- **"Movement but not flashing" needs movement that never switches off.**
+  Static washes read as frozen (strings outro: display 0.06, 25% lit). One
+  continuous Butterfly per non-canvas prop, never restarted, at speed 25 (10
+  barely moves), swelling with the music, plus the section shader filling any
+  gap on the canvases (only the canvases -- on the small Orbs the shader
+  pulsed like a flash). Measured: 70-85% lit, 0 prop flashes, smooth fade.
+- **Switched-off props are not dark props.** 50 models in this layout are
+  Active="0"; counting them made a fully lit house measure as half dark.
+- **The owner's ear beats every detector on WHERE things happen.** Three of my
+  first guesses were wrong (organ entry, the reveal, a guitar build read as a
+  drop); ask about the two or three moments the show is built around, then
+  measure them exactly.

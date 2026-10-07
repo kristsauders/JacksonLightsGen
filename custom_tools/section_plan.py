@@ -23,6 +23,27 @@ import numpy as np
 SHOW = Path("/Volumes/XLIGHTS/XLights 2026")
 
 
+def bar_lines(beats: np.ndarray, downbeats: np.ndarray, dur: float) -> np.ndarray:
+    """Bar starts AT THE TRACKED DOWNBEATS, extended past the last one.
+
+    A uniform grid (first downbeat + k * 4 * median beat) drifts: madmom
+    reports beats on a 10 ms frame, so the median gap is quantized -- 12 to 12
+    read 480 ms for a ~486 ms beat, and by bar 40 the grid sat 0.66 s (more
+    than a beat) off the real downbeat, which then went into hand-mapped
+    section times. Reading the bars off the downbeats themselves cannot drift.
+    """
+    beat_s = float(np.polyfit(np.arange(beats.size), beats, 1)[0]) if beats.size > 4 else 0.5
+    if downbeats.size >= 4:
+        bar_s = float(np.polyfit(np.arange(downbeats.size), downbeats, 1)[0])
+        starts = list(downbeats)
+    else:
+        bar_s = beat_s * 4
+        starts = [float(beats[0]) if beats.size else 0.0]
+    while starts[-1] + bar_s < dur:
+        starts.append(starts[-1] + bar_s)
+    return np.asarray(starts + [starts[-1] + bar_s], dtype=float)
+
+
 def main(song: str) -> None:
     gen = SHOW / ".generation" / song
     a = json.loads((gen / "analysis.json").read_text())
@@ -30,8 +51,9 @@ def main(song: str) -> None:
     beats = np.asarray(a["beats"]["beat_times"], dtype=float)
     downbeats = np.asarray(a["beats"].get("downbeat_times") or [], dtype=float)
     dur = float(a["duration_seconds"])
-    beat_s = float(np.median(np.diff(beats)))
-    bar_s = beat_s * 4
+    lines = bar_lines(beats, downbeats, dur)
+    beat_s = float(np.polyfit(np.arange(beats.size), beats, 1)[0])   # not the quantized median
+    bar_s = float(np.median(np.diff(lines)))
 
     y, sr = librosa.load(str(SHOW / f"{song}.mp3"), sr=22050, mono=True)
     S = np.abs(librosa.stft(y, n_fft=2048, hop_length=512))
@@ -42,12 +64,12 @@ def main(song: str) -> None:
     low = S[freqs < 200].sum(axis=0); lowm = low.mean() + 1e-9
     hi = S[freqs > 4000].sum(axis=0); him = hi.mean() + 1e-9
 
-    b0 = float(downbeats[0]) if downbeats.size else float(beats[0])
-    n_bars = int((dur - b0) // bar_s) + 1
+    b0 = float(lines[0])
+    n_bars = len(lines) - 1
     rows = []
     for k in range(n_bars):
-        s0 = b0 + k * bar_s
-        m = (t >= s0) & (t < s0 + bar_s)
+        s0 = float(lines[k])
+        m = (t >= s0) & (t < lines[k + 1])
         if not m.any():
             continue
         rows.append((k, s0, rms[m].mean() / peak, low[m].mean() / lowm, hi[m].mean() / him))

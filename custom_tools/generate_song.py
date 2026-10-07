@@ -47,6 +47,17 @@ SHOW_PATH = Path("/Volumes/XLIGHTS/XLights 2026")
 SONG_NAME = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "Gooey"
 GEN_DIR = SHOW_PATH / ".generation" / SONG_NAME
 
+# MEDLEY MODE. A long DJ-style mix is generated one song at a time (each song
+# has its own tempo, and dozens of passes here assume one tempo per file) and
+# stitched back by merge_medley.py. Each song's slice carries a medley.json
+# with its design -- sections, drops, palettes, shader pool, brightness caps,
+# the reveal -- written from custom_tools/medleys/<mix>.py. Absent for an
+# ordinary song, in which case nothing below changes behaviour.
+try:
+    MEDLEY: dict = json.loads((GEN_DIR / "medley.json").read_text())
+except Exception:
+    MEDLEY = {}
+
 
 def _peek_tempo(default: float = 120.0) -> float:
     """Tempo, read from the first bytes of analysis.json.
@@ -1368,6 +1379,14 @@ def _pass_label(lineno: int, lines: list[str]) -> str:
 
 
 SHADER_KEYS = register_shaders()
+ALL_SHADER_KEYS = list(SHADER_KEYS)   # before any medley pool narrows it
+# A medley song draws its RANDOM shader choices from its own small pool, so
+# fifteen songs in one half-hour show do not all reach for the same favourites.
+# Every shader stays registered -- a pinned section look can still name any of
+# them -- this only narrows what the generator picks on its own.
+if MEDLEY.get("shader_pool"):
+    _pool = {k if k.startswith("shader_") else "shader_" + k for k in MEDLEY["shader_pool"]}
+    SHADER_KEYS = [k for k in SHADER_KEYS if k in _pool] or SHADER_KEYS
 # The subset safe to span across the whole house -- see the house-bed pass.
 NEW_SHADER_STEMS = ("aurora_curtain", "ripple_grid", "drift_cells", "falling_embers",
                     "kaleido_bloom", "tide_lines", "ember_swarm", "contour_drift",
@@ -1851,6 +1870,11 @@ MOOD_PALETTES: dict[str, ColorPalette] = {
 }
 PALETTES.update(MOOD_PALETTES)
 PALETTES.update(MONO_PALETTES)
+# A medley song can bring its own palettes, so each song in the mix gets a
+# colour identity of its own rather than borrowing from a shared set.
+for _pn, _pc in (MEDLEY.get("palettes") or {}).items():
+    PALETTES[_pn] = ColorPalette(colors=list(_pc),
+                                 active_colors=list(range(1, len(_pc) + 1)))
 PALETTES.update(RED_PALETTES)
 
 # One family per song, chosen for that track's mood, plus two neighbours to
@@ -2222,7 +2246,10 @@ SONG_SECTION_LOOK: dict[str, dict[float, dict[str, str]]] = {
 # defined -- SHADER_KEYS is built much earlier in the file.
 for _sng, _plan in SONG_SECTION_LOOK.items():
     for _si, _pin in _plan.items():
-        if _pin.get("shader") and _pin["shader"] not in SHADER_KEYS:
+        # ALL_SHADER_KEYS, not SHADER_KEYS: a medley song narrows SHADER_KEYS
+        # to its own pool, and checking every OTHER song's pins against that
+        # pool rejected December's frost_growth as "unknown".
+        if _pin.get("shader") and _pin["shader"] not in ALL_SHADER_KEYS:
             raise SystemExit(f"SONG_SECTION_LOOK[{_sng!r}][{_si}]: unknown "
                              f"shader {_pin['shader']!r}")
         if _pin.get("palette") and _pin["palette"] not in PALETTES:
@@ -2779,6 +2806,39 @@ GROOVE_SONGS = {
     # fourths mode but it should definitely be in groove mode."
     "The Ambition (Girls Trip)",
 }
+
+# --- MEDLEY: fold this song's design into the ordinary per-song knobs ------
+# Everything the generator already knows how to do for a hand-designed song
+# (SONG_SECTIONS, SONG_DROPS, SONG_SECTION_LOOK, ...) is driven from the
+# medley file instead of from entries in this source, so a 15-song mix does
+# not add 15 blocks here.
+if MEDLEY:
+    if MEDLEY.get("sections"):
+        SONG_SECTIONS[SONG_NAME] = [(float(a), str(b)) for a, b in MEDLEY["sections"]]
+    # Drops and ambient are ALWAYS the design's in a medley -- an empty list
+    # means none. Left to the detectors, the Nils Frahm opener (no drums at
+    # all) got two auto-detected drops, the first staged as a whole-house
+    # white hit at 0:01.9 -- the very first thing the audience would see.
+    SONG_DROPS[SONG_NAME] = [float(x) for x in MEDLEY.get("drops") or []]
+    SONG_AMBIENT[SONG_NAME] = [(float(a), float(b)) for a, b in MEDLEY.get("ambient") or []]
+    if MEDLEY.get("climax"):
+        SONG_CLIMAX[SONG_NAME] = [float(x) for x in MEDLEY["climax"]]
+    if MEDLEY.get("section_look"):
+        SONG_SECTION_LOOK[SONG_NAME] = {float(k): dict(v)
+                                        for k, v in MEDLEY["section_look"].items()}
+        # ...validated the same way as the in-source pins, which ran before
+        # these were applied.
+        for _si, _pin in SONG_SECTION_LOOK[SONG_NAME].items():
+            if _pin.get("shader") and _pin["shader"] not in ALL_SHADER_KEYS:
+                raise SystemExit(f"medley section_look[{_si}]: unknown shader {_pin['shader']!r}")
+            if _pin.get("palette") and _pin["palette"] not in PALETTES:
+                raise SystemExit(f"medley section_look[{_si}]: unknown palette {_pin['palette']!r}")
+    if MEDLEY.get("palette_family"):
+        SONG_PALETTE_FAMILY[SONG_NAME] = list(MEDLEY["palette_family"])
+    if MEDLEY.get("groove"):
+        GROOVE_SONGS.add(SONG_NAME)
+    if MEDLEY.get("pulse_mode"):
+        PULSE_MODE_OVERRIDE[SONG_NAME] = MEDLEY["pulse_mode"]
 
 MUST_HAVE_GROUPS = {
     "Arches", "C9s", "Orbs", "Floods", "Candy Canes",
@@ -6788,6 +6848,18 @@ def main():
             print(f"Final dropout: last drum hit at {_last_hit:.1f}s, "
                   f"{_dur_s - _last_hit:.0f}s of tail at "
                   f"{_tail.mean() / _rms_s.mean():.2f}x the song mean")
+    # A song in the MIDDLE of a medley never ends -- the next one is already
+    # playing in its padded tail. Treating that tail as a final dropout would
+    # thin out the last bars of every song in the show.
+    if MEDLEY.get("interior"):
+        final_dropout = None
+    # ...and a medley song with a DESIGNED outro ends the way the design says.
+    # The final dropout reads "last drum hit, then a long tail" as the end and
+    # strips the house to dim outlines: on Light Of Day it fired at the last
+    # drum (27:09) and cleared 1,856 effects, so the string-orchestra outro
+    # Krists asked to be "beautiful and flowing" ran on 18 outlines.
+    if MEDLEY.get("outro"):
+        final_dropout = None
 
     # --- AMBIENT PASSAGES: sequence the SHAPE, not the beat ----------------
     #
@@ -8836,7 +8908,13 @@ def main():
         _named = sorted(SONG_DROPS[SONG_NAME])
         _keep = []
         for _i, _t in enumerate(_named):
-            _t = _snap_drop(float(_t))
+            # A medley's drops were placed against the audio by hand and are
+            # final. The kick snap below looks for the first STRONG hit up to
+            # 2-3.5 s later, and on the Jackson Lights mix it moved 6 of 21
+            # verified drops onto a louder hit a beat or two after the real
+            # one -- including the launch reveal, +1.16 s, which would have
+            # staged a second blackout-and-hit straight after it.
+            _t = float(_t) if MEDLEY else _snap_drop(float(_t))
             _match = next((c for c in cutouts
                            if abs(c["drop_time"] - _t) <= beat_ms / 2000.0), None)
             if _match:
@@ -13541,6 +13619,314 @@ def main():
                 + f" ({_n_dim} beds scaled)")
         return effects
 
+    # ---- MEDLEY GUARDS ---------------------------------------------------
+    # Moments a single song never needed, for a half-hour show built as one
+    # medley. All three are no-ops unless this song's medley.json asks.
+    def _bright_factor(e) -> float:
+        """Current brightness as a fraction of full (1.0 = plain 100%)."""
+        if e.palette is None:
+            return 1.0
+        for _x in (e.palette.extra_parts or []):
+            if _x.startswith("C_VALUECURVE_Brightness="):
+                _m = re.search(r"Values=([0-9.:;]+)", _x)
+                if _m:
+                    _v = [float(s.split(":")[1]) for s in _m.group(1).split(";") if ":" in s]
+                    if _v:
+                        return max(_v) / VC_NOMINAL
+        return 1.0
+
+    def _set_bright_curve(e, pts) -> None:
+        """Replace the brightness curve with `pts` = [(pos 0..1, factor)]."""
+        _parts = [x for x in (e.palette.extra_parts or [])
+                  if not x.startswith("C_VALUECURVE_Brightness=")]
+        _vals = ";".join(f"{max(0.0, min(1.0, a)):.3f}:{max(0.004, VC_NOMINAL * f):.3f}"
+                         for a, f in pts)
+        # Type=Custom, never Flat -- a Flat curve with Values renders BLACK.
+        _parts.append("C_VALUECURVE_Brightness=Active=TRUE|Id=ID_VALUECURVE_Brightness|"
+                      "Type=Custom|Min=0.00|Max=400.00|RV=TRUE|Values=" + _vals)
+        e.palette = e.palette.model_copy(update={"extra_parts": _parts})
+
+    def _g_medley_caps(effects):
+        """Hold a stretch of the show to a brightness RANGE.
+
+        "The first song is a slow ambient synth song and the point is to have
+        very low illumination, like 10-20% maybe, it's just the warmup... then
+        the next song starts with an organ sound and we should have something
+        distinct but still pretty low illumination like maybe 30-50% until the
+        first big drop."
+
+        Brightness is MAPPED into [lo, hi] (lo + (hi-lo) * current), not just
+        multiplied, so the warm-up still breathes with the music inside its
+        range instead of flattening to one level. Anything that OVERLAPS a cap
+        window is capped -- a bed that starts in the padding would otherwise
+        spill full brightness into the window it was never meant to light.
+        """
+        caps = MEDLEY.get("caps") or []
+        if not caps:
+            return effects
+        n = 0
+        for e in effects:
+            if e.effect_name == "Off" or e.palette is None:
+                continue
+            s, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            for c0, c1, lo, hi in caps:
+                if s < c1 and en > c0:
+                    f = _bright_factor(e)
+                    _set_bright_curve(e, [(0.0, lo + (hi - lo) * min(f, 1.0)),
+                                          (1.0, lo + (hi - lo) * min(f, 1.0))])
+                    n += 1
+                    break
+        print(f"Medley caps: {n} effects held to their brightness range "
+              f"({', '.join(f'{a:.0f}-{b:.0f}s {100*lo:.0f}-{100*hi:.0f}%' for a, b, lo, hi in caps)})")
+        return effects
+
+    def _g_medley_reveal(effects):
+        """THE REVEAL: six hits, a breath of dark, then the drop.
+
+        "The 6-7 hit drop is at 2:58, that's the main open turn on all lights
+        moment... 6 rapid hits spaced evenly, then a brief break, then a drop...
+        The big six hits are important to get right." Measured on the demucs
+        drum stem (the full mix hides them under a guitar build): six hits
+        0.22s apart at full loudness, a 0.44s break, then the drop.
+
+        Every active prop is lit at 100% on every hit -- the house never goes
+        dark during the six -- and the colour CONTRAST is carried by splitting
+        the house into two halves in two opposing colours that swap on each
+        hit. Model-level effects, because a model-level effect beats any group
+        bed underneath it. Then every prop goes dark for the break, so the
+        drop has somewhere to come from.
+        """
+        rv = MEDLEY.get("reveal")
+        if not rv:
+            return effects
+        hits = [float(x) for x in rv["hits"]]
+        drop = float(rv["drop"])
+        ca, cb = rv.get("colours", ["#FFD700", "#0047FF"])
+        w0 = int((hits[0] - 0.03) * 1000)
+        w1 = int(drop * 1000)
+        # 1. a clean slate: nothing else paints the hits or the break
+        _kill, _trimmed = set(), 0
+        for e in effects:
+            if e.end_time_ms <= w0 or e.start_time_ms >= w1:
+                continue
+            if e.start_time_ms < w0:
+                e.end_time_ms = w0                # a bed running INTO the reveal stops at it
+            elif e.end_time_ms > w1 + 200:
+                # ...and one running OUT of it starts after it. The generator
+                # snaps section starts onto beats, and the beat nearest this
+                # drop is 0.21s EARLY, inside the break -- so the drop section's
+                # first beds can start in this window. Deleting them would
+                # leave the drop with nothing under it; moving their start to
+                # the drop keeps the section and still keeps the break dark.
+                e.start_time_ms = w1
+                _trimmed += 1
+            else:
+                _kill.add(id(e))
+        if _kill:
+            # IN PLACE. add() appends to the generator's own `effects` list (a
+            # closure), not to this guard's parameter; rebinding the name to
+            # drop_effects()'s new list sent all 570 hits, the break and the
+            # drop hit into a list nobody returned. The log counted them and
+            # the render measured 0% lit on every one of the six hits.
+            effects[:] = drop_effects(effects, _kill, "the reveal owns these seconds")
+        dead = inactive_models()
+        props = sorted(m for m in positions
+                       if m.split("/")[0] not in dead
+                       and not m.startswith("Tunnel Arches") and m != "Tunnel")
+
+        def _side(m):
+            l = m.lower()
+            return 0 if (is_matrix_canvas(m) or m == "Mega Tree" or m.startswith("Arch ")
+                         or "tunnel matrix" in l or "cane" in l or "mini tree" in l) else 1
+        pal = {c: PALETTES["white"].model_copy(update={"colors": [c], "active_colors": [1]})
+               for c in (ca, cb)}
+        hit_len = (hits[-1] - hits[-2]) if len(hits) > 1 else 0.22
+        # THE BIG CANVASES COUNT UP INSTEAD OF FLASHING. add() turns any flat
+        # hit on a prop too big to flash (Krists: "too much for the eyes in
+        # person") into a travelling burst -- measured on v2, the Mega Tree lit
+        # 12% and the Garage Roof 28% on the hits. Six full-canvas colour
+        # swaps in 1.1 s would be exactly the strobe that rule exists for, so
+        # instead each hit FILLS the next sixth of every big canvas, bottom to
+        # top, and holds it: every hit reads, nothing switches off, and on the
+        # sixth the canvases are full. Each canvas keeps one colour; they
+        # alternate gold / blue left to right so the house shows both.
+        big = sorted((m for m in props if m in NO_FLAT_PROPS),
+                     key=lambda m: float(positions[m].get("x", 0) or 0))
+        big_col = {m: (ca, cb)[i % 2] for i, m in enumerate(big)}
+        n = 0
+        for k, h in enumerate(hits):
+            h1 = hits[k + 1] if k + 1 < len(hits) else h + hit_len
+            for m in props:
+                if m in big_col:
+                    _pos = str(int(round(100.0 * (k + 1) / len(hits))))
+                    add(m, L_BASE, "fill_up", int(h * 1000), int(h1 * 1000), pal[big_col[m]],
+                        {"E_VALUECURVE_Fill_Position": "Active=FALSE|Id=ID_VALUECURVE_Fill_Position|",
+                         "E_TEXTCTRL_Fill_Position": _pos, "E_SLIDER_Fill_Position": _pos,
+                         "X_Reveal": "1", "X_Blackout": "1"})
+                    n += 1
+                    continue
+                col = (ca, cb)[(_side(m) + k) % 2]
+                add(m, L_BASE, "on_hit", int(h * 1000), int(h1 * 1000), pal[col],
+                    {"T_TEXTCTRL_Fadein": "0.00",
+                     "T_TEXTCTRL_Fadeout": "0.00" if k + 1 < len(hits) else "0.06",
+                     "X_Reveal": "1", "X_Blackout": "1"})
+                n += 1
+        # 2. the break: every prop dark
+        b0 = int((hits[-1] + hit_len) * 1000)
+        for m in props:
+            if w1 - b0 >= FRAME_MS:
+                add(m, L_BASE, "off", b0, w1, PALETTES["white"], {"X_Reveal": "1"})
+        # 3. THE DROP HIT, placed here rather than left to drop staging, which
+        # snaps to the nearest beat -- 0.21s early, inside the break. One beat
+        # of the whole house at full, in the same two colours (not swapped:
+        # this is the landing, not another hit), fading into the section.
+        _beat = max(0.30, min(0.60, beat_ms / 1000.0))
+        for m in props:
+            if m in big_col:
+                # A swell, not a flash: a sharp attack and a long decay is the
+                # one full-canvas hit the no-flash rule allows (fade-out >= 0.8
+                # s), so the big canvases land the drop at full instead of
+                # being turned into a burst.
+                add(m, L_BASE, "on_hit", w1, int((drop + 1.2) * 1000), pal[big_col[m]],
+                    {"T_TEXTCTRL_Fadein": "0.00", "T_TEXTCTRL_Fadeout": "0.90",
+                     "X_Reveal": "1", "X_Blackout": "1"})
+                continue
+            add(m, L_BASE, "on_hit", w1, int((drop + _beat) * 1000),
+                pal[(ca, cb)[_side(m)]],
+                {"T_TEXTCTRL_Fadein": "0.00", "T_TEXTCTRL_Fadeout": f"{_beat * 0.8:.2f}",
+                 "X_Reveal": "1", "X_Blackout": "1"})
+        print(f"Medley reveal: {len(hits)} hits x {len(props)} props ({n} placements) at "
+              f"{', '.join(f'{x:.3f}' for x in hits)}; dark {b0/1000:.2f}-{drop:.2f}; "
+              f"drop hit at {drop:.3f}; {len(big)} big canvases count up; "
+              f"{_trimmed} drop-section beds moved to start "
+              f"at the drop  [{ca} / {cb}, swapping each hit]")
+        return effects
+
+    def _g_medley_outro(effects):
+        """A strings outro: movement, never flashing, then a slow fade.
+
+        "Make sure the ending is something beautiful and flowing because it's
+        a string orchestra outro and is dramatic but smooth so there should be
+        movement but not flashing and then a slow fadeout."
+
+        From `no_flash_from` every short flat hit goes (an On, a short
+        shockwave burst, anything under 1.5s that is not a travelling
+        gesture); chases, shaders and washes stay, because they are the
+        movement. Over `fade` every effect's brightness follows a linear ramp
+        to zero, written INTO each effect's own curve so long beds fade
+        smoothly across their length rather than stepping.
+        """
+        of = MEDLEY.get("outro")
+        if not of:
+            return effects
+        nf = float(of.get("no_flash_from", 1e9))
+        f0, f1 = (float(x) for x in of.get("fade", (1e9, 1e9)))
+        _kill = set()
+        for e in effects:
+            s, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            if s >= nf and en - s < 1.5 and e.effect_name in ("On", "Shockwave", "Strobe",
+                                                                "Color Wash", "Ripple"):
+                _kill.add(id(e))
+            elif s >= f1:
+                _kill.add(id(e))
+        if _kill:
+            # In place: add() below appends to the generator's own list (see
+            # the reveal guard -- rebinding here would lose every flow bed).
+            effects[:] = drop_effects(effects, _kill, "strings outro: no flashing")
+
+        # MOVEMENT THAT NEVER SWITCHES OFF. Measured on the first build, the
+        # strings had shaders on the big canvases and a static Color Wash on
+        # everything else -- display mean 0.06, 25% lit: smooth, but frozen,
+        # not "beautiful and flowing". Every other active prop now carries ONE
+        # continuous Butterfly in the section palette from no_flash_from to
+        # the end of the fade: a slow gradient drifting along the prop, fully
+        # lit (so nothing can read as on/off) and never restarted (a new
+        # effect every few seconds would jump). It swells with the strings,
+        # 35% -> 75% across the build to the fade, then fades with everything.
+        _dead = inactive_models()
+        _top = {}
+        for e in effects:
+            _top[e.model_name] = max(_top.get(e.model_name, -1), e.layer)
+        _sec_pal = next((section_meta[i].get("palette")
+                         for i, sec in enumerate(analysis.sections)
+                         if sec.start_time <= nf + 0.5 < sec.end_time
+                         and i < len(section_meta)), None) or PALETTES["white"]
+        # The canvases keep their shaders; everything else flows. Not the whole
+        # no-flash list: it also holds the Orbs, and the aurora shader on a
+        # prop that small pulsed 0.07 -> 0.33 -> 0.07 in half a second.
+        _canvases = {m for m in positions
+                     if is_matrix_canvas(m) or m in CONE_SHAPED or "tunnel matrix" in m.lower()}
+        _flow = []
+        for m in sorted(positions):
+            if (m.split("/")[0] in _dead or m in _canvases
+                    or m.startswith("Tunnel Arches") or m == "Tunnel"):
+                continue
+            _n0 = len(effects)
+            # A free layer below everything the prop already has, so it can
+            # never overlap (and silently not render beside) an existing one.
+            # Speed 25: at the default 10 the drift measured 15-27 levels per
+            # channel over several seconds -- moving, but not visibly.
+            add(m, _top.get(m, -1) + 1, "butterfly", int(nf * 1000), int(f1 * 1000),
+                _sec_pal, {"X_OutroFlow": "1", "E_SLIDER_Butterfly_Speed": "25"})
+            _flow += effects[_n0:]
+        # ...and the big canvases never go dark inside it. Their shader beds
+        # stopped at 27:26.5 of the 27:08.8-28:06 outro (the matrices then sat
+        # black for 40 s of the strings), so any gap is filled with the
+        # section's own pinned shader.
+        _look = None
+        for _k, _v in (MEDLEY.get("section_look") or {}).items():
+            if float(_k) <= nf + 0.5 and (_look is None or float(_k) > _look[0]):
+                _look = (float(_k), _v)
+        _shk = _look[1].get("shader") if _look else None
+        _gaps = 0
+        if _shk in EFFECTS:
+            for m in sorted(_canvases):
+                if m.split("/")[0] in _dead or m.startswith("Tunnel Arches") or m == "Tunnel":
+                    continue
+                _cov = sorted((e.start_time_ms, e.end_time_ms) for e in effects
+                              if e.model_name == m and e.effect_name != "Off"
+                              and e.end_time_ms > nf * 1000 and e.start_time_ms < f1 * 1000)
+                _t = int(nf * 1000)
+                _holes = []
+                for _a, _b in _cov:
+                    if _a > _t + 500:
+                        _holes.append((_t, _a))
+                    _t = max(_t, _b)
+                if _t < int(f1 * 1000) - 500:
+                    _holes.append((_t, int(f1 * 1000)))
+                for _a, _b in _holes:
+                    _n0 = len(effects)
+                    add(m, _top.get(m, -1) + 1, _shk, _a, _b, _sec_pal, {"X_OutroFlow": "1"})
+                    _flow += effects[_n0:]
+                    _gaps += 1
+
+        def env(x):
+            return 1.0 if x <= f0 else (0.0 if x >= f1 else 1.0 - (x - f0) / (f1 - f0))
+
+        def swell(x):
+            return 0.35 + 0.40 * min(1.0, max(0.0, (x - nf) / max(f0 - nf, 1e-3)))
+        _flow_ids = {id(e) for e in _flow}
+        n = 0
+        for e in effects:
+            if e.effect_name == "Off" or e.palette is None:
+                continue
+            s, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            if en <= f0:
+                continue
+            base = _bright_factor(e)
+            span = max(en - s, 1e-3)
+            if id(e) in _flow_ids:
+                xs = sorted({s, en, f0, f1})
+                _set_bright_curve(e, [((x - s) / span, swell(x) * env(x)) for x in xs])
+            else:
+                xs = sorted({s, en, *(x for x in (f0, f1) if s < x < en)})
+                _set_bright_curve(e, [((x - s) / span, base * env(x)) for x in xs])
+            n += 1
+        print(f"Medley outro: {len(_kill)} flashes removed from {nf:.1f}s; "
+              f"{len(_flow)} flow beds ({_gaps} filling big-canvas gaps); "
+              f"{n} effects fade to black over {f0:.1f}-{f1:.1f}s")
+        return effects
+
     def _g_no_dead_props(effects):
         """Nothing is placed on a prop Krists has switched off.
 
@@ -13577,6 +13963,13 @@ def main():
         So this is separate and absolute -- find where the audio actually ends
         and let nothing outlive it by more than a breath.
         """
+        if MEDLEY.get("interior"):
+            return effects                # the music does not stop here
+        if MEDLEY.get("outro"):
+            # The outro's fade is the ending: it was set by ear to outlast the
+            # strings' reverb by a few seconds, and the outro guard already
+            # removes anything that would start after it.
+            return effects
         _rms = np.asarray(analysis.spectrum.rms_energy, dtype=float)
         _rt = np.asarray(analysis.spectrum.rms_times, dtype=float)
         if _rms.size < 10:
@@ -14113,6 +14506,9 @@ def main():
         ("every matrix shows the same thing", _g_matrix_unison),
         ("the arches leap again", _g_arch_leap),
         ("the show follows the arc of the song", _g_section_arc),
+        ("medley: brightness ranges", _g_medley_caps),
+        ("medley: the reveal", _g_medley_reveal),
+        ("medley: strings outro", _g_medley_outro),
         ("nothing placed on a switched-off prop", _g_no_dead_props),
         ("nothing lit after the music stops", _g_dark_after_audio),
         # LAST. `_g_replace_on_drop` deliberately runs the OUTGOING shader all
