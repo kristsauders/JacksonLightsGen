@@ -122,6 +122,18 @@ def design(mix: str) -> None:
             o = d["outro"]
             out["outro"] = {"no_flash_from": conv(o["no_flash_from"]),
                             "fade": [conv(x) for x in o["fade"]]}
+        if "scenes" in d:
+            # Every time-valued field of a scene, converted the same way.
+            def _sc(v, key):
+                if key in ("window", "build", "fade", "hits", "chords"):
+                    return [conv(x) for x in v]
+                if key == "swells":
+                    return [[conv(x) for x in sw] for sw in v]
+                if key in ("drop", "end", "peak", "frame_from", "roof_from",
+                           "arches_from", "build2", "rise_from"):
+                    return conv(v)
+                return v
+            out["scenes"] = [{k: _sc(v, k) for k, v in sc.items()} for sc in d["scenes"]]
         for k in ("palettes", "palette_family", "shader_pool", "groove", "pulse_mode"):
             if k in d:
                 out[k] = d[k]

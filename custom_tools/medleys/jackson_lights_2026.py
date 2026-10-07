@@ -60,8 +60,26 @@ DESIGN: dict[str, dict] = {
             62.92: {"palette": "hearth", "shader": "shader_slow_dawn"},
             79.12: {"palette": "haze",   "shader": "shader_bokeh_drift"},
         },
-        "ambient": [(0.0, 95.89)],
-        "caps": [(0.0, 105.89, 0.10, 0.20)],
+        # THE TEASER (v5). v4 held the whole song to 10-20% and it read as
+        # "static and dim". Krists: "very little of the display lit up at a
+        # time... the effects can be full brightness... sneak peek [the coolest
+        # parts]... timing them with the synth swells". The opener is fifteen
+        # swells -- each a ~2 s rise and ~3 s decay -- in four phrases with
+        # near-silence at 0:24-0:28 and 0:59-1:02. One gesture per swell, all
+        # in whites (colour is held back for the reveal), escalating from a
+        # single prop to the peak at 1:21.
+        "scenes": [{"kind": "teaser", "window": [0.0, 95.89],
+                    "swells": [[1.0, 3.2, 5.8], [6.0, 8.0, 10.3], [10.5, 12.4, 15.0],
+                               [15.2, 17.2, 23.5], [29.0, 30.7, 33.3], [33.6, 35.7, 38.4],
+                               [38.6, 40.8, 43.1], [43.4, 45.1, 49.6], [50.0, 52.1, 53.6],
+                               [53.6, 55.2, 59.5], [63.0, 65.6, 67.6], [67.6, 69.6, 74.9],
+                               [75.5, 77.8, 79.0], [79.0, 81.0, 83.0], [83.0, 84.1, 94.0]],
+                    "gestures": ["tree_rise", "arch_leap", "sweep_lr", "ring_tree",
+                                 "spinner_arm", "ring_right", "vert_rise+roof_chase",
+                                 "spheres", "matrix_slit", "sweep_rl+twinkle",
+                                 "ring_mid+arch_leap+vert_rise", "floods+spinner_arm",
+                                 "sweep_up", "twinkle+roof_chase+tree_rise+matrix_slit",
+                                 "ring_tree"]}],
     },
 
     # =====================================================================
@@ -94,10 +112,27 @@ DESIGN: dict[str, dict] = {
             239.04: {"palette": "cathedral", "shader": "shader_stained_glass"},
             245.49: {"palette": "nebula",    "shader": "shader_black_cherry_cosmos"},
         },
-        "ambient": [(95.89, 163.47)],
-        "caps": [(85.89, 178.13, 0.30, 0.50)],
-        "reveal": {"hits": [178.160, 178.375, 178.594, 178.829, 179.053, 179.288],
-                   "drop": 179.732, "colours": ["#FFD700", "#0047FF"]},
+        # THE ORGAN (v5): full brightness, small share lit, GRAYSCALE -- the
+        # verticals are organ pipes re-registered on every chord change, then
+        # the window frames, the roofline and the arches join; the guitar
+        # build goes rhythmic on every outline, still without colour. Krists:
+        # "all the verticals, horizontals, c9s, outlines... grayscale, and
+        # then the big drop can reveal all the color".
+        # THE FRENZY (v5): "for this one moment we need to go pretty crazy" --
+        # six whole-house hits in six colour pairs (the sixth a rainbow), a
+        # black break, a white drop, then two bars of half-house strobing with
+        # every canvas bursting on the beat, until the groove settles in.
+        "scenes": [
+            {"kind": "organ", "window": [95.89, 178.13],
+             "chords": [96.00, 106.22, 108.26, 112.32, 115.83, 119.22, 121.77, 125.23,
+                        128.32, 130.27, 135.96, 137.56, 140.33, 143.00, 145.11, 148.61,
+                        150.45, 154.19, 156.07, 158.04, 160.13],
+             "frame_from": 108.26, "roof_from": 96.00, "arches_from": 121.77,
+             "build": [163.47, 171.26], "build2": 171.26, "rise_from": 176.30},
+            {"kind": "frenzy",
+             "hits": [178.160, 178.375, 178.594, 178.829, 179.053, 179.288],
+             "drop": 179.732, "end": 183.65},
+        ],
         "drops": [179.732],
         # The reveal chorus wears the BRIGHTEST shader of the song. Black Cherry
         # Cosmos is mostly dark sky: measured on the first build, the chorus
@@ -533,5 +568,17 @@ DESIGN: dict[str, dict] = {
         # faded in. The fade follows the strings' decay (27:45.6) and ends a
         # few seconds after their reverb does (~28:05).
         "outro": {"no_flash_from": 1628.79, "fade": [1665.61, 1686.0]},
+        # THE WORKS (v5) for the last chorus: "very rhythmic... shaders moving,
+        # verticals bouncing, props spinning back and forth, arches leaping,
+        # floods blooming". THE HORIZON (v5) for the strings: high contrast,
+        # "a perfect photo op... slow swaying to the strings" -- gold light
+        # rising and falling into a royal-blue sky on every vertical, canvas
+        # and sphere, a bar per sway; the roofline's colour line swaying side
+        # to side; rose arches; no flashing; swell to 27:43, fade to 28:06.
+        "scenes": [
+            {"kind": "works", "window": [1576.56, 1628.79]},
+            {"kind": "horizon", "window": [1628.79, 1729.29], "peak": 1663.1,
+             "fade": [1665.61, 1686.0]},
+        ],
     },
 }

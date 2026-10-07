@@ -128,8 +128,20 @@ def main() -> None:
                   f"lit {100*vals[:,0].mean():.0f}%, lit level {vals[:,1].mean():.2f}")
 
     # ---- the reveal -------------------------------------------------------
+    # ---- hand-choreographed scenes: how much is lit, how bright -----------
+    print("\nscenes (4 samples/s): lit% mean / p90, lit-pixel level, display mean")
     for name, d in D.items():
-        rv = d.get("reveal")
+        for sc in d.get("scenes", []):
+            w = sc.get("window") or [sc["hits"][0], sc["end"]]
+            rows = np.array([stat(t) + (levels(t).mean(),)
+                             for t in np.arange(w[0] + 0.1, w[1], 0.25)])
+            print(f"  {name[:22]:22s} {sc['kind']:8s} {w[0]:7.1f}-{w[1]:7.1f}: lit "
+                  f"{100 * rows[:, 0].mean():4.1f}% / {100 * np.percentile(rows[:, 0], 90):4.1f}%, "
+                  f"level {rows[:, 1].mean():.2f}, display {rows[:, 3].mean():.3f}")
+
+    for name, d in D.items():
+        rv = d.get("reveal") or next((sc for sc in d.get("scenes", [])
+                                      if sc["kind"] == "frenzy"), None)
         if not rv:
             continue
         print(f"\nreveal ({name}):")

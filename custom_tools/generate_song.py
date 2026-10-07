@@ -13927,6 +13927,523 @@ def main():
               f"{n} effects fade to black over {f0:.1f}-{f1:.1f}s")
         return effects
 
+    # ---- MEDLEY SCENES ----------------------------------------------------
+    # Hand-choreographed stretches of a medley, placed from the design file
+    # and owning their window outright (everything the passes put there is
+    # cleared first, the same way the reveal works). Each scene exists because
+    # the generic passes cannot produce what Krists asked for in that moment:
+    #
+    #   teaser   0:00-1:36  "very little of the display lit up at a time...
+    #            teasing the audience with how many lights there are and what
+    #            they can do... sneak peek [the coolest parts]... timing them
+    #            with the synth swells"
+    #   organ    1:36-2:58  "full brightness effects with some color contrast
+    #            but only lighting up a pretty small percent... all the
+    #            verticals, horizontals, c9s, outlines... grayscale, and then
+    #            the big drop can reveal all the color"
+    #   frenzy   2:58-3:03  the six hits and the drop: "for this one moment we
+    #            need to go pretty crazy"
+    #   works    the last chorus: "shaders moving, verticals bouncing, props
+    #            spinning back and forth, arches leaping, floods blooming"
+    #   horizon  the strings: "high color contrast... a perfect photo op...
+    #            slow swaying to the strings", no flashing, then the fade
+    EFFECTS.update({
+        "sc_on":      ("On", {}),
+        "sc_bar":     ("Bars", {"B_CHOICE_BufferStyle": "Per Model Default",
+                                "E_CHECKBOX_Bars_3D": "1", "E_CHECKBOX_Bars_Gradient": "0",
+                                # no highlight: it draws a white leading edge on
+                                # EVERY band, black ones included -- measured, a
+                                # "thin" slit lit 55-70% of each matrix.
+                                "E_CHECKBOX_Bars_Highlight": "0",
+                                "E_CHOICE_Bars_Direction": "Right",
+                                "E_SLIDER_Bars_BarCount": "1", "E_TEXTCTRL_Bars_Cycles": "1.0"}),
+        # Per Preview, centre 50/50, end radius 180: Krists's own whole-house
+        # ring, from his downloaded sequences.
+        "sc_ring":    ("Shockwave", {"B_CHOICE_BufferStyle": "Per Preview",
+                                     "E_CHECKBOX_Shockwave_Blend_Edges": "1",
+                                     "E_NOTEBOOK_Shockwave": "Position",
+                                     "E_SLIDER_Shockwave_Accel": "0",
+                                     "E_SLIDER_Shockwave_CenterX": "50",
+                                     "E_SLIDER_Shockwave_CenterY": "50",
+                                     "E_SLIDER_Shockwave_Cycles": "1",
+                                     "E_SLIDER_Shockwave_Start_Radius": "1",
+                                     "E_SLIDER_Shockwave_End_Radius": "180",
+                                     "E_SLIDER_Shockwave_Start_Width": "5",
+                                     "E_SLIDER_Shockwave_End_Width": "14"}),
+        "sc_fill":    ("Fill", {"B_CHOICE_BufferStyle": "Per Model Default",
+                                "E_CHOICE_Fill_Direction": "Up", "E_CHECKBOX_Fill_Wrap": "0",
+                                "E_SLIDER_Fill_Band_Size": "0", "E_SLIDER_Fill_Offset": "0",
+                                "E_SLIDER_Fill_Skip_Size": "0",
+                                "E_CHECKBOX_Fill_Offset_In_Pixels": "0",
+                                "E_CHECKBOX_Fill_Color_Time": "0"}),
+        "sc_pin":     ("Pinwheel", {"B_CHOICE_BufferStyle": "Per Model Default",
+                                    "E_SLIDER_Pinwheel_Arms": "2", "E_SLIDER_Pinwheel_Speed": "4",
+                                    "E_CHECKBOX_Pinwheel_Rotation": "1",
+                                    "E_SLIDER_Pinwheel_Thickness": "10",
+                                    "E_SLIDER_Pinwheel_ArmSize": "100",
+                                    "E_SLIDER_Pinwheel_Twist": "0",
+                                    "E_CHOICE_Pinwheel_Style": "New Render Method"}),
+        # Per model: on the whole-house canvas each twinkle cell covers many
+        # pixels and Count 3 measured 35% of the house lit.
+        "sc_twinkle": ("Twinkle", {"B_CHOICE_BufferStyle": "Per Model Default",
+                                   "E_SLIDER_Twinkle_Count": "4", "E_SLIDER_Twinkle_Steps": "40",
+                                   "E_CHECKBOX_Twinkle_Strobe": "0",
+                                   "E_CHECKBOX_Twinkle_ReRandom": "1"}),
+        "sc_wash":    ("Color Wash", {"B_CHOICE_BufferStyle": "Per Model Default",
+                                      "E_CHECKBOX_ColorWash_HFade": "0",
+                                      "E_CHECKBOX_ColorWash_VFade": "0",
+                                      "E_TEXTCTRL_ColorWash_Cycles": "1.0"}),
+    })
+
+    def _sc_pal(*cols, sparkle: int = 0) -> ColorPalette:
+        return ColorPalette(colors=list(cols), active_colors=list(range(1, len(cols) + 1)),
+                            sparkle_frequency=sparkle)
+
+    def _sc_thin(col: str, n: int = 8) -> ColorPalette:
+        """One lit band in `n`: Bars paints each palette slot as a band, so a
+        single colour among black slots is a thin travelling line."""
+        return _sc_pal(col, *(["#000000"] * (n - 1)))
+
+    def _sc_fade(a: float, b: float) -> dict:
+        return {"T_TEXTCTRL_Fadein": f"{max(0.0, a):.2f}", "T_TEXTCTRL_Fadeout": f"{max(0.0, b):.2f}"}
+
+    _SC_DEAD = inactive_models()
+
+    def _sc_live(m: str) -> bool:
+        return (m.split("/")[0] not in _SC_DEAD and not m.startswith("Tunnel Arches")
+                and m != "Tunnel")
+
+    def _sc_x(m: str) -> float:
+        return float((positions.get(m) or positions.get(m.split("/")[0]) or {}).get("x", 0) or 0)
+
+    _SC_CANVAS = sorted((m for m in positions if _sc_live(m)
+                         and (is_matrix_canvas(m) or m in CONE_SHAPED
+                              or "tunnel matrix" in m.lower())), key=_sc_x)
+    _SC_PROPS = sorted((m for m in positions if _sc_live(m)), key=_sc_x)
+    _SC_ARCHES = sorted((m for m in _SC_PROPS if re.fullmatch(r"Arch \d", m)), key=_sc_x)
+    _SC_SPIN = [m for m in ("GE Rosa Grande 1", "SOL GE Baby Grand Illusion",
+                            "Showstopper Spinner", "Showstopper Snowflake")
+                if m in positions and _sc_live(m)]
+    _SC_FLOODS = [m for m in _SC_PROPS if m.startswith("Flood-")]
+    _SC_VERTS = sorted((m for m in _SC_PROPS if m.startswith("Vertical Strip")), key=_sc_x)
+
+    def _sc_ring_centre(m: str) -> tuple[str, str]:
+        """Shockwave centre (percent of the whole-house canvas) at a prop."""
+        xs = [float(p.get("x", 0) or 0) for n, p in positions.items() if _sc_live(n)]
+        ys = [float(p.get("y", 0) or 0) for n, p in positions.items() if _sc_live(n)]
+        p = positions.get(m) or {}
+        cx = 100.0 * (float(p.get("x", 0)) - min(xs)) / max(1e-6, max(xs) - min(xs))
+        cy = 100.0 * (float(p.get("y", 0)) - min(ys)) / max(1e-6, max(ys) - min(ys))
+        return f"{cx:.0f}", f"{cy:.0f}"
+
+    _sc_busy: dict = {}
+
+    def _put(target, key, s, e, pal, extra=None, layer=0, tag="1"):
+        """Place on the first layer, from `layer` down, that is free for the
+        span -- a scene stacks gestures and must never create a same-layer
+        overlap (which xLights would silently not render)."""
+        s_ms = int(round(s * 1000 / FRAME_MS)) * FRAME_MS
+        e_ms = max(s_ms + FRAME_MS, int(round(e * 1000 / FRAME_MS)) * FRAME_MS)
+        lay = layer
+        while any(s_ms < b and a < e_ms for a, b in _sc_busy.get((target, lay), ())):
+            lay += 1
+        _sc_busy.setdefault((target, lay), []).append((s_ms, e_ms))
+        add(target, lay, key, s_ms, e_ms, pal, {**(extra or {}), "X_Scene": tag})
+        return effects[-1]
+
+    def _sc_slate(effects, w0, w1, keep=None, why="scene"):
+        """Clear [w0, w1) seconds, in place. A bed running INTO the window
+        stops at it; one starting inside and running well past starts after
+        it; everything else inside goes."""
+        a_ms, b_ms = int(w0 * 1000), int(w1 * 1000)
+        kill, moved = set(), 0
+        for e in effects:
+            if e.end_time_ms <= a_ms or e.start_time_ms >= b_ms:
+                continue
+            if keep and keep(e):
+                continue
+            if e.start_time_ms < a_ms:
+                e.end_time_ms = a_ms
+            elif e.end_time_ms > b_ms + 200:
+                e.start_time_ms = b_ms
+                moved += 1
+            else:
+                kill.add(id(e))
+        if kill:
+            effects[:] = drop_effects(effects, kill, f"medley scene: {why}")
+        return len(kill), moved
+
+    def _sc_beats(a: float, b: float) -> list[float]:
+        return [float(x) for x in beats if a - 1e-3 <= x < b]
+
+    def _sc_bars(a: float, b: float) -> list[float]:
+        return [float(x) for x in (downbeats or []) if a - 1e-3 <= x < b]
+
+    def _sc_arch_leap(arch, s, e, pal, rightward=True, fades=None):
+        # Written per arch, compensated for its wiring: Arches 1-2 are wired
+        # R and 3-4 L, which is what split them into opposite directions
+        # until the leap pass learned it.
+        key = "arch_leap_vps" if travel_dir_for(arch, "Left-Right" if rightward else "Right-Left",
+                                                "R") == "Left-Right" else "arch_leap_vps_r"
+        return _put(arch, key, s, e, pal, fades)
+
+    # -- teaser ---------------------------------------------------------------
+    def _scene_teaser(sc):
+        w0, w1 = sc["window"]
+        _sc_slate(effects, w0, w1, why="teaser")
+        whites = ["#FFFFFF", "#FFD9A6", "#CFE4FF"]
+        tree_c = _sc_ring_centre("Mega Tree") if "Mega Tree" in positions else ("50", "30")
+        n = 0
+        for i, (names, (r, p, e)) in enumerate(zip(sc["gestures"], sc["swells"])):
+            c = whites[i % len(whites)]
+            rise, decay, dur = p - r, e - p, e - r
+            fd = _sc_fade(min(rise, dur * 0.45), min(decay, dur * 0.55))
+            for g in names.split("+"):
+                if g == "tree_rise" and "Mega Tree" in positions:
+                    _put("Mega Tree", "sc_bar", r, e, _sc_thin(c),
+                         {**fd, "E_CHOICE_Bars_Direction": "up"})
+                elif g == "arch_leap":
+                    d = dur / max(1, len(_SC_ARCHES))
+                    for k, a in enumerate(_SC_ARCHES):
+                        _sc_arch_leap(a, r + k * d, r + (k + 1) * d + 0.3, _sc_pal(c),
+                                      True, _sc_fade(0.1, 0.25))
+                elif g.startswith("sweep_"):
+                    _dir = {"sweep_lr": "Right", "sweep_rl": "Left", "sweep_up": "up"}[g]
+                    _put("All", "sc_bar", r, e, _sc_thin(c),
+                         {**fd, "B_CHOICE_BufferStyle": "Per Preview",
+                          "E_CHOICE_Bars_Direction": _dir})
+                elif g.startswith("ring_"):
+                    cx, cy = {"ring_tree": tree_c, "ring_mid": ("50", "50"),
+                              "ring_right": ("85", "45"), "ring_left": ("15", "45")}[g]
+                    _put("All", "sc_ring", r, e, _sc_pal(c, sparkle=140),
+                         {**fd, "E_SLIDER_Shockwave_CenterX": cx,
+                          "E_SLIDER_Shockwave_CenterY": cy})
+                elif g == "spinner_arm":
+                    for m in _SC_SPIN:
+                        _put(m, "sc_pin", r, e, _sc_pal(c),
+                             {**fd, "E_SLIDER_Pinwheel_Arms": "1", "E_SLIDER_Pinwheel_Speed": "3"})
+                elif g == "spheres":
+                    _put("Hanging Spheres", "sphere_strands", r, e, _sc_pal(c), fd)
+                elif g == "vert_rise":
+                    _put("Corner Verticals", "strand_up", r, min(e, p + 1.2), _sc_pal(c),
+                         _sc_fade(0.3, 0.6))
+                elif g == "matrix_slit":
+                    for k, m in enumerate(x for x in _SC_CANVAS if x != "Mega Tree"):
+                        _put(m, "sc_bar", r + 0.3 * k, e, _sc_thin(c),
+                             {**fd, "E_CHOICE_Bars_Direction": "up"})
+                elif g == "roof_chase":
+                    _put("Horizontal C9s", "chase_mid_out", r, e, _sc_pal(c), fd)
+                elif g == "floods" and _SC_FLOODS:
+                    for m in (_SC_FLOODS[0], _SC_FLOODS[-1]):
+                        _put(m, "sc_on", r, e, _sc_pal(c), _sc_fade(rise, decay))
+                elif g == "twinkle":
+                    _put("All", "sc_twinkle", r, e, _sc_pal(c), fd)
+                else:
+                    continue
+                n += 1
+        print(f"Medley teaser: {n} gestures on {len(sc['swells'])} synth swells, "
+              f"{w0:.1f}-{w1:.1f}s, full brightness, small share lit")
+
+    # -- organ ----------------------------------------------------------------
+    def _scene_organ(sc):
+        w0, w1 = sc["window"]
+        _sc_slate(effects, w0, w1, why="organ")
+        WHITE, ICE, WARM = "#FFFFFF", "#BFD4FF", "#FFE2B8"
+        chords = sorted(c for c in sc["chords"] if w0 - 0.5 <= c < w1)
+        b0, b1 = sc["build"]
+        chords = [c for c in chords if c < b0] or [w0]
+        if chords[0] > w0 + 0.5:
+            chords.insert(0, w0)
+        rng = random.Random(f"{SONG_NAME}|organ")
+        # ORGAN PIPES: each vertical a pipe, each chord a new registration of
+        # heights, the change gliding in over 0.6 s. Fill RIGHT, not Up: a
+        # single-line prop's buffer is one row along the strand, so Up is all
+        # or nothing (measured: one or two strips lit, the rest dark). The
+        # strips are drawn top-down with Dir=R, which puts node 1 -- the
+        # buffer's left edge -- at the ground, so Right rises from the ground.
+        PIPE = {"E_CHOICE_Fill_Direction": "Right"}
+        prev = {v: 0.0 for v in _SC_VERTS}
+        for i, c in enumerate(chords):
+            nxt = chords[i + 1] if i + 1 < len(chords) else b0
+            for j, v in enumerate(_SC_VERTS):
+                lvl = round(20 + 80 * (0.5 + 0.5 * np.sin(j * 0.9 + i * 1.7 + rng.random())), 0)
+                g = min(0.6, (nxt - c) * 0.4)
+                ramp = ("Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
+                        f"Max=100.00|P1={prev[v]:.2f}|P2={lvl:.2f}|RV=TRUE|")
+                _put(v, "sc_fill", c, c + g, _sc_pal(WHITE),
+                     {**PIPE, "E_VALUECURVE_Fill_Position": ramp,
+                      "E_TEXTCTRL_Fill_Position": f"{lvl:.0f}"})
+                _put(v, "sc_fill", c + g, nxt, _sc_pal(WHITE),
+                     {**PIPE, "E_VALUECURVE_Fill_Position": "Active=FALSE|Id=ID_VALUECURVE_Fill_Position|",
+                      "E_TEXTCTRL_Fill_Position": f"{lvl:.0f}", "E_SLIDER_Fill_Position": f"{lvl:.0f}"})
+                prev[v] = lvl
+        # the house's frame appears, then the roofline breathes, then the arches
+        if sc.get("frame_from") is not None:
+            for grp in ("Window Verticals", "Window Horizontals"):
+                _put(grp, "sc_on", sc["frame_from"], b0, _sc_pal(ICE), _sc_fade(2.0, 0.0))
+        for i, c in enumerate(chords):
+            nxt = chords[i + 1] if i + 1 < len(chords) else b0
+            if sc.get("roof_from") is not None and c >= sc["roof_from"] - 0.05:
+                _put("Horizontal C9s", "chase_mid_out", c, min(nxt, c + 3.5), _sc_pal(WARM),
+                     _sc_fade(0.2, 0.8))
+            if sc.get("arches_from") is not None and c >= sc["arches_from"] - 0.05:
+                for a in _SC_ARCHES:
+                    _sc_arch_leap(a, c, min(nxt, c + 2.0), _sc_pal(WHITE), i % 2 == 0,
+                                  _sc_fade(0.1, 0.4))
+        # THE BUILD, still grayscale: everything outlined goes rhythmic.
+        bts = _sc_beats(b0, w1)
+        half = max(1, len(_SC_VERTS) // 2)
+        for k, t in enumerate(bts):
+            nb = bts[k + 1] if k + 1 < len(bts) else w1
+            fast = t >= sc.get("build2", w1)
+            side = _SC_VERTS[:half] if k % 2 == 0 else _SC_VERTS[half:]
+            for v in (_SC_VERTS if fast else side):
+                _put(v, "sc_on", t, nb, _sc_pal(WHITE), _sc_fade(0.0, (nb - t) * 0.7))
+            on_bar = t in set(_sc_bars(b0, w1))
+            if fast or on_bar:
+                _put("Horizontal C9s", "chase_lr" if k % 2 == 0 else "chase_rl", t,
+                     t + (nb - t) * (1 if fast else 4), _sc_pal(WARM), _sc_fade(0.0, 0.2))
+                for a in _SC_ARCHES:
+                    _sc_arch_leap(a, t, t + (nb - t) * (1 if fast else 2), _sc_pal(WHITE),
+                                  k % 2 == 0, _sc_fade(0.0, 0.15))
+            if fast:
+                for grp in ("GE Insane Cane Outlilne GRP", "Flakes Outline All GRP",
+                            "Window Verticals", "Window Horizontals"):
+                    _put(grp, "sc_on", t, nb, _sc_pal(ICE if k % 2 else WHITE),
+                         _sc_fade(0.0, (nb - t) * 0.6))
+        if sc.get("rise_from") is not None:
+            _put("All", "sc_bar", sc["rise_from"], w1, _sc_thin(WHITE, 6),
+                 {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Bars_Direction": "up",
+                  "E_TEXTCTRL_Bars_Cycles": "2.0"})
+        print(f"Medley organ: {len(chords)} chords as organ pipes on {len(_SC_VERTS)} verticals, "
+              f"build of {len(bts)} beats, grayscale until the hits")
+
+    # -- frenzy: the six hits and the drop --------------------------------------
+    def _scene_frenzy(sc):
+        hits, drop, end = [float(x) for x in sc["hits"]], float(sc["drop"]), float(sc["end"])
+        _sc_slate(effects, hits[0] - 0.03, end, why="the reveal frenzy")
+        pairs = [("#FFD700", "#0047FF"), ("#FF00C8", "#00E5FF"), ("#FF1A1A", "#00FF4C"),
+                 ("#FF7A00", "#7A00FF"), ("#FFFFFF", "#FF00C8")]
+        xs = [_sc_x(m) for m in _SC_PROPS]
+        x0, x1 = min(xs), max(xs)
+
+        def _rainbow(m):
+            import colorsys
+            h = (_sc_x(m) - x0) / max(1e-6, x1 - x0) * 0.85
+            r_, g_, b_ = colorsys.hsv_to_rgb(h, 1.0, 1.0)
+            return f"#{int(r_ * 255):02X}{int(g_ * 255):02X}{int(b_ * 255):02X}"
+
+        def _side(m):
+            return 0 if (m in _SC_CANVAS or m.startswith("Arch ") or "cane" in m.lower()
+                         or "mini tree" in m.lower()) else 1
+        n = 0
+        # SIX HITS, every prop, every canvas: a colour pair each, the sixth a
+        # rainbow across the house -- the colour arrives here.
+        for k, h in enumerate(hits):
+            for m in _SC_PROPS:
+                col = _rainbow(m) if k == len(hits) - 1 else pairs[k % len(pairs)][(_side(m) + k) % 2]
+                _put(m, "sc_on", h, h + 0.11, _sc_pal(col))
+                n += 1
+        # the break stays black; the DROP lands white on everything...
+        for m in _SC_PROPS:
+            _put(m, "sc_on", drop, drop + 0.10, _sc_pal("#FFFFFF"))
+        # ...then the house strobes in halves on the eighths, the colours
+        # turning over every beat, and every canvas bursts on every beat.
+        bts = [drop + 0.10] + _sc_beats(drop + 0.2, end)
+        cols = ["#FFD700", "#0047FF", "#FF00C8", "#00E5FF", "#FF1A1A", "#00FF4C",
+                "#FF7A00", "#7A00FF"]
+        A = [m for m in _SC_PROPS if m not in _SC_CANVAS and _side(m) == 0]
+        B = [m for m in _SC_PROPS if m not in _SC_CANVAS and _side(m) == 1]
+        # side 0 holds few small props once the canvases are out; balance by x
+        small = [m for m in _SC_PROPS if m not in _SC_CANVAS]
+        A, B = small[0::2], small[1::2]
+        for k, t in enumerate(bts):
+            nb = bts[k + 1] if k + 1 < len(bts) else end
+            mid = (t + nb) / 2
+            ca, cb = cols[k % len(cols)], cols[(k + 4) % len(cols)]
+            for (s_, grp, col) in ((t, A, ca), (mid, B, cb)):
+                for m in grp:
+                    _put(m, "sc_on", s_, s_ + (nb - t) * 0.32, _sc_pal(col))
+                    n += 1
+            for j, m in enumerate(_SC_CANVAS):
+                _put(m, "shockwave", t, nb, _sc_pal(cols[(k + j) % len(cols)]),
+                     {"E_SLIDER_Shockwave_Start_Width": "40", "E_SLIDER_Shockwave_End_Width": "90"})
+                n += 1
+        print(f"Medley frenzy: 6 colour-pair hits on {len(_SC_PROPS)} props, white drop at "
+              f"{drop:.3f}, {len(bts)} beats of half-house strobing to {end:.2f}")
+
+    # -- works: the last chorus, as rhythmic as possible -----------------------
+    def _scene_works(sc):
+        w0, w1 = sc["window"]
+
+        def _canvas(e):
+            return e.model_name.split("/")[0] in _SC_CANVAS
+        _sc_slate(effects, w0, w1, keep=_canvas, why="the works")
+        # the canvases keep their shaders and run them forward/back on the beat
+        n_sh = 0
+        for e in effects:
+            if (e.effect_name == "Shader" and _canvas(e)
+                    and e.end_time_ms > w0 * 1000 and e.start_time_ms < w1 * 1000):
+                span = max(1, e.end_time_ms - e.start_time_ms)
+                pts, k4 = [], 0
+                for bt in beats:
+                    f = (bt * 1000 - e.start_time_ms) / span
+                    if 0.0 <= f <= 1.0:
+                        k4 += 1
+                        v = 0.85 if k4 % 2 else 0.15
+                        pts += [(round(f, 3), v), (round(min(1.0, f + 0.001), 3), v)]
+                if len(pts) >= 4:
+                    pts = sorted(dict(pts).items())[:60]
+                    if pts[0][0] > 0:
+                        pts.insert(0, (0.0, pts[0][1]))
+                    if pts[-1][0] < 1:
+                        pts.append((1.0, pts[-1][1]))
+                    e.settings = {**e.settings, "E_VALUECURVE_Shader_Speed":
+                                  "Active=TRUE|Id=ID_VALUECURVE_Shader_Speed|Type=Custom|"
+                                  "Min=-1000.00|Max=1000.00|RV=TRUE|Values="
+                                  + ";".join(f"{a:.3f}:{b:.2f}" for a, b in pts) + "|"}
+                    n_sh += 1
+        GOLD, SKY, PEACH, WHITE, BLUE = "#FFC857", "#87CEEB", "#FF9F80", "#FFFFFF", "#2050FF"
+        bts = _sc_beats(w0, w1)
+        bars = set(round(x, 3) for x in _sc_bars(w0, w1))
+        half = max(1, len(_SC_VERTS) // 2)
+        smalls = [m for m in _SC_PROPS if m.startswith(("GE Insane Cane", "Mini Tree", "Orb-",
+                                                         "Flake I", "Snowflake EFL"))]
+        bar_i = -1
+        n = 0
+        for k, t in enumerate(bts):
+            nb = bts[k + 1] if k + 1 < len(bts) else w1
+            L = nb - t
+            if round(t, 3) in bars:
+                bar_i += 1
+            c1, c2 = (GOLD, BLUE) if bar_i % 2 == 0 else (WHITE, PEACH)
+            # BOLD, not thin. A single travelling dot measured as the
+            # verticals/arches/roofline sitting nearly dark (mean 0.04-0.09)
+            # while v4's busier chorus pulsed 52 of 84 props on every beat.
+            # Verticals: a level meter -- full height on the beat, falling.
+            for v in _SC_VERTS:
+                _put(v, "sc_fill", t, nb, _sc_pal(c1 if k % 2 == 0 else c2),
+                     {"E_CHOICE_Fill_Direction": "Right",
+                      "E_VALUECURVE_Fill_Position":
+                      "Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
+                      "Max=100.00|P1=100.00|P2=12.00|RV=TRUE|"})
+            # the arches leap together, a wide band, back and forth on the beat
+            for a in _SC_ARCHES:
+                _sc_arch_leap(a, t, nb, _sc_pal(c1), k % 2 == 0,
+                              {**_sc_fade(0.0, 0.1), "E_SLIDER_Color_Mix1": "45"})
+            # the roofline answers in the other colour
+            _put("Horizontal C9s", "chase_rl" if k % 2 == 0 else "chase_lr", t, nb, _sc_pal(c2),
+                 {"E_SLIDER_Color_Mix1": "35", "E_SLIDER_Number_Chases": "2"})
+            # floods bloom: alternate halves, sharp attack, long decay
+            fl = _SC_FLOODS[0::2] if k % 2 == 0 else _SC_FLOODS[1::2]
+            for m in fl:
+                _put(m, "sc_on", t, nb, _sc_pal(c1 if k % 2 == 0 else c2), _sc_fade(0.03, L * 0.8))
+            # spheres fill on one beat and drain on the next (a sphere never
+            # just flashes)
+            for m in _SC_PROPS:
+                if m.startswith(("Hanging Sphere", "Sphere-")):
+                    _put(m, "fill_up" if k % 2 == 0 else "fill_down", t, nb,
+                         _sc_pal(c2 if k % 2 == 0 else c1))
+            # small props pop in pairs
+            for j, m in enumerate(smalls):
+                if (j + k) % 2 == 0:
+                    _put(m, "sc_on", t, t + L * 0.6, _sc_pal(c2 if j % 2 else c1),
+                         _sc_fade(0.0, L * 0.4))
+            n += 1
+        # spinners spin back and forth: direction flips every bar
+        bl = sorted(bars) or [w0]
+        for i, t in enumerate(bl):
+            nb = bl[i + 1] if i + 1 < len(bl) else w1
+            for m in _SC_SPIN:
+                _put(m, "sc_pin", t, nb, _sc_pal(GOLD, BLUE),
+                     {"E_SLIDER_Pinwheel_Arms": "4", "E_SLIDER_Pinwheel_Speed": "14",
+                      "E_SLIDER_Pinwheel_Thickness": "30",
+                      "E_CHECKBOX_Pinwheel_Rotation": "1" if i % 2 == 0 else "0"})
+        print(f"Medley works: {n} beats of bounce/leap/bloom/pop/spin, "
+              f"{n_sh} canvas shaders reversing on the beat, {w0:.1f}-{w1:.1f}s")
+
+    # -- horizon: the strings, a swaying photo -----------------------------------
+    def _scene_horizon(sc):
+        w0, w1 = sc["window"]
+        f0, f1 = sc["fade"]
+        peak = sc.get("peak", f0)
+        _sc_slate(effects, w0, w1, why="the strings horizon")
+        SKY, GOLD, ROSE, WARM = "#1E3CFF", "#FFB000", "#FF2A8A", "#FFF1D8"
+        # one sway per bar, following the strings' own (slowing) bar lines
+        bl = [t for t in _sc_bars(w0, f1)]
+        if len(bl) < 4:
+            bl = list(np.arange(w0, f1, 2.4))
+        if bl[0] > w0 + 0.05:
+            bl.insert(0, w0)
+        bl.append(f1)
+        LOW, HIGH = 30.0, 80.0
+
+        def env(x):
+            sw = 0.55 + 0.45 * min(1.0, max(0.0, (x - w0) / max(1e-3, peak - w0)))
+            fd = 1.0 if x <= f0 else (0.0 if x >= f1 else 1.0 - (x - f0) / (f1 - f0))
+            return sw * fd
+        placed = []
+
+        def _sway(target, base_col, fill_col, direction, phase=0, buf=None):
+            placed.append(_put(target, "sc_on", w0, f1, _sc_pal(base_col), layer=1))
+            for i in range(len(bl) - 1):
+                a, b = bl[i], bl[i + 1]
+                up = (i + phase) % 2 == 0
+                p1, p2 = (LOW, HIGH) if up else (HIGH, LOW)
+                ramp = ("Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
+                        f"Max=100.00|P1={p1:.2f}|P2={p2:.2f}|RV=TRUE|")
+                ex = {"E_VALUECURVE_Fill_Position": ramp, "E_CHOICE_Fill_Direction": direction}
+                if buf:
+                    ex["B_CHOICE_BufferStyle"] = buf
+                placed.append(_put(target, "sc_fill", a, b, _sc_pal(fill_col), ex, layer=0))
+        # dawn: gold light rising and falling into a royal-blue sky, everywhere
+        for v in _SC_VERTS:
+            _sway(v, SKY, GOLD, sc.get("vert_dir", "Right"))     # along the strand, from the ground
+        for i, m in enumerate(_SC_CANVAS):
+            _sway(m, SKY, GOLD, "Up")
+        for m in [x for x in _SC_PROPS if x.startswith("Hanging Sphere")]:
+            _sway(m, SKY, GOLD, "Up")
+        # the roofline: the colour line sways side to side, across the house
+        _sway("Horizontal C9s", ROSE, GOLD, "Right", buf="Per Preview")
+        # the arches: rose, with a wide gold band gliding across and back, a
+        # bar each way. The proven wiring-compensated arch chase, not Fill: on
+        # the three-row arches Fill measured Arch 3 and Arch 4 (same Dir)
+        # filling from opposite ends.
+        for a in _SC_ARCHES:
+            placed.append(_put(a, "sc_on", w0, f1, _sc_pal(ROSE), layer=1))
+            for i in range(len(bl) - 1):
+                placed.append(_sc_arch_leap(a, bl[i], bl[i + 1], _sc_pal(GOLD), i % 2 == 0,
+                                            {"E_SLIDER_Color_Mix1": "50"}))
+        # spinners turn slowly; floods breathe between sky and rose
+        for m in _SC_SPIN:
+            placed.append(_put(m, "sc_pin", w0, f1, _sc_pal(GOLD, SKY),
+                               {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Speed": "2",
+                                "E_SLIDER_Pinwheel_Thickness": "45"}))
+        cyc = max(1.0, round((f1 - w0) / 10.0))
+        for m in _SC_FLOODS:
+            placed.append(_put(m, "sc_wash", w0, f1, _sc_pal(SKY, ROSE, SKY),
+                               {"E_TEXTCTRL_ColorWash_Cycles": f"{cyc:.1f}"}))
+        # and everything small holds a colour: the photo
+        statics = {"GE Insane Cane": ROSE, "Mini Tree": GOLD, "Orb-": SKY, "Flake I": WARM,
+                   "Snowflake EFL": WARM, "Mini Tree Star": GOLD, "Sphere-": GOLD}
+        for m in _SC_PROPS:
+            col = next((c for k_, c in statics.items() if m.startswith(k_)), None)
+            if col and m not in _SC_SPIN:
+                placed.append(_put(m, "sc_on", w0, f1, _sc_pal(col)))
+        # the swell and the fade, written into every curve
+        for e in placed:
+            s, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            xs = sorted({s, en, *(x for x in (peak, f0) if s < x < en)})
+            _set_bright_curve(e, [((x - s) / max(1e-3, en - s), env(x)) for x in xs])
+        print(f"Medley horizon: {len(placed)} effects, {len(bl) - 1} bar-long sways, "
+              f"swell to {peak:.1f}s, fade {f0:.1f}-{f1:.1f}s, no flashing")
+
+    def _g_medley_scenes(effects):
+        for sc in MEDLEY.get("scenes") or []:
+            {"teaser": _scene_teaser, "organ": _scene_organ, "frenzy": _scene_frenzy,
+             "works": _scene_works, "horizon": _scene_horizon}[sc["kind"]](sc)
+        return effects
+
     def _g_no_dead_props(effects):
         """Nothing is placed on a prop Krists has switched off.
 
@@ -14509,6 +15026,7 @@ def main():
         ("medley: brightness ranges", _g_medley_caps),
         ("medley: the reveal", _g_medley_reveal),
         ("medley: strings outro", _g_medley_outro),
+        ("medley: hand-choreographed scenes", _g_medley_scenes),
         ("nothing placed on a switched-off prop", _g_no_dead_props),
         ("nothing lit after the music stops", _g_dark_after_audio),
         # LAST. `_g_replace_on_drop` deliberately runs the OUTGOING shader all

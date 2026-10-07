@@ -819,6 +819,32 @@ Lessons, each measured on this mix:
   pulsed like a flash). Measured: 70-85% lit, 0 prop flashes, smooth fade.
 - **Switched-off props are not dark props.** 50 models in this layout are
   Active="0"; counting them made a fully lit house measure as half dark.
+- **Hand-choreographed scenes for the moments a show is built around.** The
+  passes make good songs; they cannot make a teaser, an organ, a frenzy or a
+  photo. A design `scenes` entry owns its window outright (cleared first, like
+  the reveal) and places named gestures: `teaser` (one gesture per synth
+  swell, full brightness, ~1-20% of the house lit), `organ` (verticals as
+  organ pipes re-registered on each chord, grayscale outlines, a rhythmic
+  build), `frenzy` (six colour-pair hits, a white drop, half-house strobing),
+  `works` (a whole chorus bouncing, leaping, blooming, popping, spinning) and
+  `horizon` (a swaying high-contrast photo, no flashing, swell then fade).
+  Swells come from a 1-2 s smoothed RMS (peaks with prominence > 0.06);
+  chords from chroma novelty between 1 s windows.
+- **"Small share lit" needs checking per buffer.** Bars' highlight paints a
+  white edge on every band, black ones too (a "thin" slit lit 55-70% of a
+  matrix); a twinkle on a Per Preview group lights whole canvas cells (35% of
+  the house at Count 3). Highlight off; twinkle per model.
+- **A single-line prop's buffer is one row along the strand**: Fill Up is all
+  or nothing on a vertical. Fill Right rises from node 1, which on these
+  top-down `Dir=R` strips is the ground.
+- **Thin is not rhythmic.** A one-dot chase per beat left the verticals,
+  arches and roofline averaging 0.04-0.09 -- fewer props pulsing (26/84) than
+  the generated chorus it replaced (52/84). A level-meter fill on the
+  verticals, wide-band leaps (`E_SLIDER_Color_Mix1` 35-50) and sphere
+  fill/drain brought it to 62/84. Measure per-beat swing per prop.
+- **Use the proven arch chase for anything directional on the arches.** Fill
+  on the three-row arches went opposite ways on two arches with the same
+  `Dir`; the wiring-compensated SingleStrand chase is consistent.
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then
