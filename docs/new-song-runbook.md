@@ -845,6 +845,22 @@ Lessons, each measured on this mix:
 - **Use the proven arch chase for anything directional on the arches.** Fill
   on the three-row arches went opposite ways on two arches with the same
   `Dir`; the wiring-compensated SingleStrand chase is consistent.
+- **Sync to the music's own events, at the right resolution.** Chord changes
+  from 1 s chroma windows found half of the organ's changes, and a 0.6 s glide
+  then landed each one most of a second late. 0.4 s windows, each change
+  snapped to the nearest harmonic onset, and a 0.12 s snap: the pipes now
+  change 35 ms after the chord (median). Bow strokes are the small swells of
+  the strings' 300-3000 Hz envelope (a stroke every 0.55-0.75 s).
+- **Drive a shader's motion by POSITION, not by its clock.** Reversing the
+  shader speed curve on every bow stroke did make it swing per stroke, but the
+  clock integrates, so stroke-to-stroke error drifted the image to one side
+  within 15 s. xLights accepts a value curve on a shader's own float input
+  (`E_VALUECURVE_SHADERXYZZY_<name>`, range = the slider's x100 range), so a
+  custom shader can expose the gesture (`bow`, -1..1) and the curve sets it
+  exactly -- no drift, and holding the curve holds the image still.
+- **Custom shaders for a scene live in SHOW/Shaders and are built in the scene**
+  (`shader_settings(...)` inline), never added to SHADER_PICKS, so no ordinary
+  song can pick them at random. Colour inputs take the palette in order.
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then

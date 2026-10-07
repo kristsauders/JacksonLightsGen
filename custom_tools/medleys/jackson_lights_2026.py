@@ -78,8 +78,12 @@ DESIGN: dict[str, dict] = {
                                  "spinner_arm", "ring_right", "vert_rise+roof_chase",
                                  "spheres", "matrix_slit", "sweep_rl+twinkle",
                                  "ring_mid+arch_leap+vert_rise", "floods+spinner_arm",
-                                 "sweep_up", "twinkle+roof_chase+tree_rise+matrix_slit",
-                                 "ring_tree"]}],
+                                 "sweep_up", "twinkle+roof_chase+tree_rise+glints",
+                                 "ring_tree"],
+                    # ONE colour peek, on the brightest swell (1:19-1:23): the
+                    # reveal's blue, with the matrices showing a sparse Night
+                    # Glints starfield. Everything else stays white.
+                    "peek": [13, "#1E50FF"]}],
     },
 
     # =====================================================================
@@ -124,9 +128,14 @@ DESIGN: dict[str, dict] = {
         # every canvas bursting on the beat, until the groove settles in.
         "scenes": [
             {"kind": "organ", "window": [95.89, 178.13],
-             "chords": [96.00, 106.22, 108.26, 112.32, 115.83, 119.22, 121.77, 125.23,
-                        128.32, 130.27, 135.96, 137.56, 140.33, 143.00, 145.11, 148.61,
-                        150.45, 154.19, 156.07, 158.04, 160.13],
+             # Chord changes from chroma novelty over 0.4 s windows (1 s
+             # windows found only half of them -- why the pipes drifted out of
+             # step), each snapped to the organ's attack on the harmonic onset.
+             "chords": [95.92, 105.84, 107.20, 108.27, 109.11, 113.59, 114.51, 116.10,
+                        116.87, 120.89, 121.89, 122.76, 124.66, 125.71, 129.05, 129.64,
+                        131.46, 136.20, 137.82, 138.61, 140.26, 143.60, 144.90, 146.29,
+                        147.38, 148.34, 149.37, 150.84, 154.01, 155.34, 157.90, 159.54,
+                        162.85],
              "frame_from": 108.26, "roof_from": 96.00, "arches_from": 121.77,
              "build": [163.47, 171.26], "build2": 171.26, "rise_from": 176.30},
             {"kind": "frenzy",
@@ -577,8 +586,17 @@ DESIGN: dict[str, dict] = {
         # to side; rose arches; no flashing; swell to 27:43, fade to 28:06.
         "scenes": [
             {"kind": "works", "window": [1576.56, 1628.79]},
+            # Bow strokes: the small swells of the strings' 300-3000 Hz
+            # envelope, one every 0.55-0.75 s. The strings stop at 27:45.0.
             {"kind": "horizon", "window": [1628.79, 1729.29], "peak": 1663.1,
-             "fade": [1665.61, 1686.0]},
+             "fade": [1665.61, 1686.0], "still_from": 1665.0,
+             "strokes": [1634.26, 1635.37, 1636.00, 1636.91, 1638.03, 1638.68, 1639.29,
+                         1639.84, 1640.39, 1641.00, 1641.60, 1642.43, 1643.22, 1643.74,
+                         1644.31, 1644.87, 1645.54, 1646.25, 1646.73, 1647.23, 1647.94,
+                         1648.43, 1649.12, 1649.70, 1650.20, 1651.12, 1651.59, 1652.38,
+                         1653.06, 1653.77, 1654.36, 1655.09, 1655.95, 1656.63, 1657.71,
+                         1658.26, 1658.87, 1659.85, 1660.79, 1661.83, 1662.38, 1662.92,
+                         1663.41, 1664.10]},
         ],
     },
 }

@@ -13995,6 +13995,14 @@ def main():
                                       "E_TEXTCTRL_ColorWash_Cycles": "1.0"}),
     })
 
+    # The two custom shaders, written for these scenes (SHOW/Shaders). Built
+    # here rather than registered, so no ordinary song can ever pick them.
+    from isf_shader import shader_settings as _isf
+    for _k, _stem in (("sc_dawn", "Dawn Strings"), ("sc_glints", "Night Glints")):
+        _fs = SHOW_PATH / "Shaders" / f"{_stem}.fs"
+        if _fs.exists():
+            EFFECTS[_k] = ("Shader", {**_isf(_fs, speed=100), "B_CHOICE_BufferStyle": "Per Model Default"})
+
     def _sc_pal(*cols, sparkle: int = 0) -> ColorPalette:
         return ColorPalette(colors=list(cols), active_colors=list(range(1, len(cols) + 1)),
                             sparkle_frequency=sparkle)
@@ -14094,8 +14102,11 @@ def main():
         whites = ["#FFFFFF", "#FFD9A6", "#CFE4FF"]
         tree_c = _sc_ring_centre("Mega Tree") if "Mega Tree" in positions else ("50", "30")
         n = 0
+        peek_i, peek_c = (sc.get("peek") or [None, None])
         for i, (names, (r, p, e)) in enumerate(zip(sc["gestures"], sc["swells"])):
-            c = whites[i % len(whites)]
+            # ONE colour in the whole warm-up, on its brightest swell: a
+            # glimpse of what the reveal will do, then back to white.
+            c = peek_c if i == peek_i else whites[i % len(whites)]
             rise, decay, dur = p - r, e - p, e - r
             fd = _sc_fade(min(rise, dur * 0.45), min(decay, dur * 0.55))
             for g in names.split("+"):
@@ -14131,6 +14142,9 @@ def main():
                     for k, m in enumerate(x for x in _SC_CANVAS if x != "Mega Tree"):
                         _put(m, "sc_bar", r + 0.3 * k, e, _sc_thin(c),
                              {**fd, "E_CHOICE_Bars_Direction": "up"})
+                elif g == "glints" and "sc_glints" in EFFECTS:
+                    for m in (x for x in _SC_CANVAS if x != "Mega Tree"):
+                        _put(m, "sc_glints", r, e, _sc_pal(c, "#FFFFFF"), fd)
                 elif g == "roof_chase":
                     _put("Horizontal C9s", "chase_mid_out", r, e, _sc_pal(c), fd)
                 elif g == "floods" and _SC_FLOODS:
@@ -14149,6 +14163,11 @@ def main():
         w0, w1 = sc["window"]
         _sc_slate(effects, w0, w1, why="organ")
         WHITE, ICE, WARM = "#FFFFFF", "#BFD4FF", "#FFE2B8"
+        # Two colours from the song's own cathedral palette for everything but
+        # the pipes: "a couple of colors for the organ", the rest held for the
+        # drop. The pipes stay white -- they are the organ.
+        VIOLET, GOLD = "#7A2BFF", "#FFB43A"
+        ICE, WARM = VIOLET, GOLD
         chords = sorted(c for c in sc["chords"] if w0 - 0.5 <= c < w1)
         b0, b1 = sc["build"]
         chords = [c for c in chords if c < b0] or [w0]
@@ -14167,7 +14186,9 @@ def main():
             nxt = chords[i + 1] if i + 1 < len(chords) else b0
             for j, v in enumerate(_SC_VERTS):
                 lvl = round(20 + 80 * (0.5 + 0.5 * np.sin(j * 0.9 + i * 1.7 + rng.random())), 0)
-                g = min(0.6, (nxt - c) * 0.4)
+                # SNAP, don't glide: a 0.6 s glide landed every change most of
+                # a second after the chord. 0.12 s reads as the pipes speaking.
+                g = min(0.12, (nxt - c) * 0.4)
                 ramp = ("Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
                         f"Max=100.00|P1={prev[v]:.2f}|P2={lvl:.2f}|RV=TRUE|")
                 _put(v, "sc_fill", c, c + g, _sc_pal(WHITE),
@@ -14367,15 +14388,19 @@ def main():
         w0, w1 = sc["window"]
         f0, f1 = sc["fade"]
         peak = sc.get("peak", f0)
+        still = sc.get("still_from", f0)
         _sc_slate(effects, w0, w1, why="the strings horizon")
         SKY, GOLD, ROSE, WARM = "#1E3CFF", "#FFB000", "#FF2A8A", "#FFF1D8"
-        # one sway per bar, following the strings' own (slowing) bar lines
-        bl = [t for t in _sc_bars(w0, f1)]
-        if len(bl) < 4:
-            bl = list(np.arange(w0, f1, 2.4))
-        if bl[0] > w0 + 0.05:
-            bl.insert(0, w0)
-        bl.append(f1)
+        # THE BOW. Every stroke reverses the sway -- right, left, right --
+        # "with the strokes of the strings". Strokes are the small swells of
+        # the strings' 300-3000 Hz envelope (one every 0.55-0.75 s). Before
+        # the first one the strings only hold, so the sway is one slow drift;
+        # from `still` (27:45.0, where the strings stop) nothing moves at all
+        # and the photo simply fades.
+        strokes = sorted(t for t in sc.get("strokes", []) if w0 < t < still)
+        if not strokes:
+            strokes = list(np.arange(w0 + 2.4, still, 2.4))
+        marks = [w0] + strokes + [still]
         LOW, HIGH = 30.0, 80.0
 
         def env(x):
@@ -14384,45 +14409,89 @@ def main():
             return sw * fd
         placed = []
 
-        def _sway(target, base_col, fill_col, direction, phase=0, buf=None):
+        def _lvl(i):
+            # the level the boundary has reached at mark i: the first span is
+            # a slow drift to mid-height, then it swings HIGH/LOW per stroke
+            if i == 0:
+                return LOW
+            if i == 1:
+                return (LOW + HIGH) / 2
+            return HIGH if i % 2 == 0 else LOW
+
+        def _ramp(p1, p2):
+            return ("Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
+                    f"Max=100.00|P1={p1:.2f}|P2={p2:.2f}|RV=TRUE|")
+
+        def _sway(target, base_col, fill_col, direction, buf=None):
             placed.append(_put(target, "sc_on", w0, f1, _sc_pal(base_col), layer=1))
-            for i in range(len(bl) - 1):
-                a, b = bl[i], bl[i + 1]
-                up = (i + phase) % 2 == 0
-                p1, p2 = (LOW, HIGH) if up else (HIGH, LOW)
-                ramp = ("Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
-                        f"Max=100.00|P1={p1:.2f}|P2={p2:.2f}|RV=TRUE|")
-                ex = {"E_VALUECURVE_Fill_Position": ramp, "E_CHOICE_Fill_Direction": direction}
-                if buf:
-                    ex["B_CHOICE_BufferStyle"] = buf
-                placed.append(_put(target, "sc_fill", a, b, _sc_pal(fill_col), ex, layer=0))
-        # dawn: gold light rising and falling into a royal-blue sky, everywhere
+            ex0 = {"E_CHOICE_Fill_Direction": direction}
+            if buf:
+                ex0["B_CHOICE_BufferStyle"] = buf
+            for i in range(len(marks) - 1):
+                placed.append(_put(target, "sc_fill", marks[i], marks[i + 1], _sc_pal(fill_col),
+                                   {**ex0, "E_VALUECURVE_Fill_Position":
+                                    _ramp(_lvl(i), _lvl(i + 1))}, layer=0))
+            hold = _lvl(len(marks) - 1)
+            placed.append(_put(target, "sc_fill", still, f1, _sc_pal(fill_col),
+                               {**ex0, "E_VALUECURVE_Fill_Position":
+                                "Active=FALSE|Id=ID_VALUECURVE_Fill_Position|",
+                                "E_TEXTCTRL_Fill_Position": f"{hold:.0f}",
+                                "E_SLIDER_Fill_Position": f"{hold:.0f}"}, layer=0))
+        # dawn: gold light rising and falling into a royal-blue sky
         for v in _SC_VERTS:
-            _sway(v, SKY, GOLD, sc.get("vert_dir", "Right"))     # along the strand, from the ground
-        for i, m in enumerate(_SC_CANVAS):
-            _sway(m, SKY, GOLD, "Up")
+            _sway(v, SKY, GOLD, "Right")             # along the strand, from the ground
         for m in [x for x in _SC_PROPS if x.startswith("Hanging Sphere")]:
             _sway(m, SKY, GOLD, "Up")
         # the roofline: the colour line sways side to side, across the house
         _sway("Horizontal C9s", ROSE, GOLD, "Right", buf="Per Preview")
-        # the arches: rose, with a wide gold band gliding across and back, a
-        # bar each way. The proven wiring-compensated arch chase, not Fill: on
-        # the three-row arches Fill measured Arch 3 and Arch 4 (same Dir)
-        # filling from opposite ends.
+        # the arches: a wide gold band crossing on each stroke, over rose
         for a in _SC_ARCHES:
             placed.append(_put(a, "sc_on", w0, f1, _sc_pal(ROSE), layer=1))
-            for i in range(len(bl) - 1):
-                placed.append(_sc_arch_leap(a, bl[i], bl[i + 1], _sc_pal(GOLD), i % 2 == 0,
+            for i in range(1, len(marks) - 1):
+                placed.append(_sc_arch_leap(a, marks[i], marks[i + 1], _sc_pal(GOLD), i % 2 == 1,
                                             {"E_SLIDER_Color_Mix1": "50"}))
-        # spinners turn slowly; floods breathe between sky and rose
+        # THE CANVASES: the Dawn Strings shader, its own clock driven by a
+        # speed curve that is zero on each bow change, peaks mid-stroke and
+        # reverses sign every stroke -- so the horizon tilts with the bow --
+        # then holds at zero from `still`.
+        n_sh = 0
+        if "sc_dawn" in EFFECTS:
+            # The tilt is a POSITION: the shader's `bow` input swings to the
+            # opposite extreme at each bow change and travels during the stroke,
+            # then holds from `still`. A speed curve (reversing the shader's
+            # clock each stroke) was tried first: it integrates, so stroke-to-
+            # stroke error drifted the horizon to one side within 15 s.
+            span = f1 - w0
+            bp = [(0.0, 0.5), ((marks[1] - w0) / span, 0.5)]
+            for i in range(2, len(marks)):
+                bp.append(((marks[i] - w0) / span, 0.92 if i % 2 == 0 else 0.08))
+            bp.append((1.0, bp[-1][1]))
+            bow = ("Active=TRUE|Id=ID_VALUECURVE_SHADERXYZZY_bow|Type=Custom|Min=-100.00|"
+                   "Max=100.00|RV=TRUE|Values=" + ";".join(f"{x:.4f}:{y:.3f}" for x, y in bp) + "|")
+            # the clock only drifts the rays gently, and stops with the strings
+            fs_ = (still - w0) / span
+            curve = ("Active=TRUE|Id=ID_VALUECURVE_Shader_Speed|Type=Custom|Min=-1000.00|"
+                     f"Max=1000.00|RV=TRUE|Values=0.0000:0.540;{fs_:.4f}:0.540;"
+                     f"{fs_ + 0.0005:.4f}:0.500;1.0000:0.500|")
+            for m in _SC_CANVAS:
+                placed.append(_put(m, "sc_dawn", w0, f1, _sc_pal(SKY, GOLD, ROSE),
+                                   {"E_VALUECURVE_Shader_Speed": curve,
+                                    "E_VALUECURVE_SHADERXYZZY_bow": bow}))
+                n_sh += 1
+        # spinners turn slowly until the strings stop, then hold
         for m in _SC_SPIN:
-            placed.append(_put(m, "sc_pin", w0, f1, _sc_pal(GOLD, SKY),
+            placed.append(_put(m, "sc_pin", w0, still, _sc_pal(GOLD, SKY),
                                {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Speed": "2",
                                 "E_SLIDER_Pinwheel_Thickness": "45"}))
-        cyc = max(1.0, round((f1 - w0) / 10.0))
+            placed.append(_put(m, "sc_pin", still, f1, _sc_pal(GOLD, SKY),
+                               {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Speed": "0",
+                                "E_SLIDER_Pinwheel_Thickness": "45"}))
+        # floods breathe between sky and rose, then hold rose
+        cyc = max(1.0, round((still - w0) / 10.0))
         for m in _SC_FLOODS:
-            placed.append(_put(m, "sc_wash", w0, f1, _sc_pal(SKY, ROSE, SKY),
+            placed.append(_put(m, "sc_wash", w0, still, _sc_pal(SKY, ROSE, SKY, ROSE),
                                {"E_TEXTCTRL_ColorWash_Cycles": f"{cyc:.1f}"}))
+            placed.append(_put(m, "sc_on", still, f1, _sc_pal(ROSE)))
         # and everything small holds a colour: the photo
         statics = {"GE Insane Cane": ROSE, "Mini Tree": GOLD, "Orb-": SKY, "Flake I": WARM,
                    "Snowflake EFL": WARM, "Mini Tree Star": GOLD, "Sphere-": GOLD}
@@ -14432,11 +14501,12 @@ def main():
                 placed.append(_put(m, "sc_on", w0, f1, _sc_pal(col)))
         # the swell and the fade, written into every curve
         for e in placed:
-            s, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
-            xs = sorted({s, en, *(x for x in (peak, f0) if s < x < en)})
-            _set_bright_curve(e, [((x - s) / max(1e-3, en - s), env(x)) for x in xs])
-        print(f"Medley horizon: {len(placed)} effects, {len(bl) - 1} bar-long sways, "
-              f"swell to {peak:.1f}s, fade {f0:.1f}-{f1:.1f}s, no flashing")
+            s_, en = e.start_time_ms / 1000.0, e.end_time_ms / 1000.0
+            xs = sorted({s_, en, *(x for x in (peak, f0) if s_ < x < en)})
+            _set_bright_curve(e, [((x - s_) / max(1e-3, en - s_), env(x)) for x in xs])
+        print(f"Medley horizon: {len(placed)} effects, {len(strokes)} bow strokes "
+              f"{strokes[0]:.1f}-{strokes[-1]:.1f}s, still from {still:.1f}s, "
+              f"{n_sh} canvases on Dawn Strings, fade {f0:.1f}-{f1:.1f}s, no flashing")
 
     def _g_medley_scenes(effects):
         for sc in MEDLEY.get("scenes") or []:
