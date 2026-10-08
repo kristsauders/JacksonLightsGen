@@ -116,16 +116,16 @@ DESIGN: dict[str, dict] = {
             239.04: {"palette": "cathedral", "shader": "shader_stained_glass"},
             245.49: {"palette": "nebula",    "shader": "shader_black_cherry_cosmos"},
         },
-        # THE ORGAN (v5): full brightness, small share lit, GRAYSCALE -- the
-        # verticals are organ pipes re-registered on every chord change, then
-        # the window frames, the roofline and the arches join; the guitar
-        # build goes rhythmic on every outline, still without colour. Krists:
+        # THE ORGAN (v7): full brightness, small share lit -- white verticals,
+        # violet window frames, a gold roofline and later the arches, each
+        # holding still and swelling once per bar (v6's chord-by-chord organ
+        # pipes were "too fast and messy"); the guitar build goes rhythmic. Krists:
         # "all the verticals, horizontals, c9s, outlines... grayscale, and
         # then the big drop can reveal all the color".
-        # THE FRENZY (v5): "for this one moment we need to go pretty crazy" --
-        # six whole-house hits in six colour pairs (the sixth a rainbow), a
-        # black break, a white drop, then two bars of half-house strobing with
-        # every canvas bursting on the beat, until the groove settles in.
+        # THE SIX HITS (v7): six whole-house hits in six colour pairs (the
+        # sixth a rainbow), the big canvases in hard stripes of the pair rather
+        # than flat colour; a black break; then straight into the chorus at the
+        # drop (v5-v6's post-drop strobing removed at Krists's request).
         "scenes": [
             {"kind": "organ", "window": [95.89, 178.13],
              # Chord changes from chroma novelty over 0.4 s windows (1 s
@@ -140,7 +140,7 @@ DESIGN: dict[str, dict] = {
              "build": [163.47, 171.26], "build2": 171.26, "rise_from": 176.30},
             {"kind": "frenzy",
              "hits": [178.160, 178.375, 178.594, 178.829, 179.053, 179.288],
-             "drop": 179.732, "end": 183.65},
+             "drop": 179.732},
         ],
         "drops": [179.732],
         # The reveal chorus wears the BRIGHTEST shader of the song. Black Cherry
@@ -566,7 +566,7 @@ DESIGN: dict[str, dict] = {
             1564.33: {"palette": "firstlight", "shader": "shader_ripple_grid"},
             1570.99: {"palette": "daybreak",   "shader": "shader_rain_on_glass"},
             1576.56: {"palette": "daybreak",   "shader": "shader_ripple_grid"},
-            1613.22: {"palette": "daybreak",   "shader": "shader_falling_embers"},
+            1613.22: {"palette": "daybreak",   "shader": "shader_ripple_grid"},   # embers measured 0.04 on the matrices in the climax
             1628.79: {"palette": "daybreak",   "shader": "shader_aurora_curtain"},
         },
         "ambient": [(1628.79, 1729.29)],
@@ -577,13 +577,13 @@ DESIGN: dict[str, dict] = {
         # faded in. The fade follows the strings' decay (27:45.6) and ends a
         # few seconds after their reverb does (~28:05).
         "outro": {"no_flash_from": 1628.79, "fade": [1665.61, 1686.0]},
-        # THE WORKS (v5) for the last chorus: "very rhythmic... shaders moving,
+        # THE WORKS for the last chorus: "very rhythmic... shaders moving,
         # verticals bouncing, props spinning back and forth, arches leaping,
-        # floods blooming". THE HORIZON (v5) for the strings: high contrast,
-        # "a perfect photo op... slow swaying to the strings" -- gold light
-        # rising and falling into a royal-blue sky on every vertical, canvas
-        # and sphere, a bar per sway; the roofline's colour line swaying side
-        # to side; rose arches; no flashing; swell to 27:43, fade to 28:06.
+        # floods blooming". THE STRINGS (v7): every prop a still pattern of
+        # sky/gold/rose (bands, stripes, arms), the whole display swelling with
+        # the strings' own 2 s envelope; the canvases float on the Dawn Nebula
+        # shader until 27:45, then everything holds and fades. (v5 swayed per
+        # bar, v6 per bow stroke on a horizon shader: "too literal", "too fast".)
         "scenes": [
             {"kind": "works", "window": [1576.56, 1628.79]},
             # Bow strokes: the small swells of the strings' 300-3000 Hz

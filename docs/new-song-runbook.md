@@ -861,6 +861,20 @@ Lessons, each measured on this mix:
 - **Custom shaders for a scene live in SHOW/Shaders and are built in the scene**
   (`shader_settings(...)` inline), never added to SHADER_PICKS, so no ordinary
   song can pick them at random. Colour inputs take the palette in order.
+- **Following every musical event is not the same as following the music.**
+  Organ pipes re-registered on each chord change (every 1-1.5 s) and a sway
+  reversing on each bow stroke (every 0.6 s) were both accurate and both read
+  as "too fast and messy". What Krists wanted for a slow, sustained passage
+  was STILLNESS that BREATHES: steady outlines swelling once per bar, still
+  patterned colour swelling with a 2 s envelope of the music, and motion only
+  as slow abstract texture on the big canvases. Sync the brightness to the
+  music; keep the motion slower than the music.
+- **A big-canvas hit reads better as a pattern than a slab.** Six flat colour
+  hits became hard two-colour stripes (static Bars, 0 cycles, 4 repeats), the
+  orientation turning each hit, the sixth a rainbow.
+- **Tune a shader's colour balance by measuring it.** Dawn Nebula's gold went
+  10% -> 55% -> ~33% with two threshold changes; fbm values bunch near 0.5,
+  so small threshold shifts swing coverage a lot.
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then

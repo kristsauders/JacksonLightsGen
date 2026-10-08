@@ -132,7 +132,7 @@ def main() -> None:
     print("\nscenes (4 samples/s): lit% mean / p90, lit-pixel level, display mean")
     for name, d in D.items():
         for sc in d.get("scenes", []):
-            w = sc.get("window") or [sc["hits"][0], sc["end"]]
+            w = sc.get("window") or [sc["hits"][0], sc.get("end", sc["drop"])]
             rows = np.array([stat(t) + (levels(t).mean(),)
                              for t in np.arange(w[0] + 0.1, w[1], 0.25)])
             print(f"  {name[:22]:22s} {sc['kind']:8s} {w[0]:7.1f}-{w[1]:7.1f}: lit "
