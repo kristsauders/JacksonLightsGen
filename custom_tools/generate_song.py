@@ -14212,7 +14212,16 @@ def main():
         if sc.get("arches_from") is not None:
             for a in _SC_ARCHES:
                 _breathe(a, WHITE, sc["arches_from"], 2.0)
-        # THE BUILD, still grayscale: everything outlined goes rhythmic.
+        # ...and the outlines CARRY ON under the build, rising 62% -> 90% into
+        # the hits, on a layer below the rhythm so each beat reads as a bump.
+        # Without this base the build measured 2-3% lit after an organ at
+        # 20%: a drop-out where the music builds.
+        for tgt, col in ([(v, WHITE) for v in _SC_VERTS] +
+                         [("Window Verticals", ICE), ("Window Horizontals", ICE),
+                          ("Horizontal C9s", WARM)] + [(a, WHITE) for a in _SC_ARCHES]):
+            e = _put(tgt, "sc_on", b0, w1, _sc_pal(col), layer=4)
+            _set_bright_curve(e, [(0.0, 0.62), (1.0, 0.90)])
+        # THE BUILD: everything outlined goes rhythmic.
         bts = _sc_beats(b0, w1)
         half = max(1, len(_SC_VERTS) // 2)
         for k, t in enumerate(bts):
