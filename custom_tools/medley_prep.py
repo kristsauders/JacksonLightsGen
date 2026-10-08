@@ -125,7 +125,7 @@ def design(mix: str) -> None:
         if "scenes" in d:
             # Every time-valued field of a scene, converted the same way.
             def _sc(v, key):
-                if key in ("window", "build", "fade", "hits", "chords", "strokes"):
+                if key in ("window", "build", "fade", "hits", "chords", "strokes", "stages"):
                     return [conv(x) for x in v]
                 if key == "spans":
                     return [[conv(x) for x in sp] for sp in v]

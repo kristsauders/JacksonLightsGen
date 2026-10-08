@@ -14230,76 +14230,114 @@ def main():
         chords = [c for c in chords if c < b0] or [w0]
         if chords[0] > w0 + 0.5:
             chords.insert(0, w0)
-        # STEADY OUTLINES THAT BREATHE ON THE BAR. v6 made the verticals organ
-        # pipes re-registered on every chord; Krists: "too fast and messy
-        # feeling... something static or swelling slowly on the bars". Each
-        # outline now holds one colour for the whole organ and swells once per
-        # bar (~3.6 s here): full on the downbeat, easing to 60% mid-bar.
+        # STEADY OUTLINES THAT BREATHE ON THE BAR, IN SIX STAGES. Each outline
+        # swells once per bar (full on the downbeat, 60% mid-bar) -- v6's
+        # chord-by-chord pipes were "too fast and messy" -- and the organ is
+        # split into stages on bar lines so it keeps GROWING: v9-v12 held one
+        # look for 68 s ("the same visual for too long... keep it minimal but
+        # still have a bit more change... build more tension"). Each stage
+        # changes colours and adds one element: frames, then the roofline and
+        # a single slow spinner arm, then the arches and two arms, then the
+        # spheres and snowflake outlines, then everything a little faster.
+        CRIMSON, LILAC, ICEW, WARMW = "#C0184E", "#E6D2FF", "#DDE6FF", "#FFE6C8"
+        STAGES = [
+            dict(verts=WHITE, drift=GOLD),
+            dict(verts=WHITE, frames=VIOLET, drift=VIOLET),
+            dict(verts=ICEW, frames=VIOLET, roof=GOLD, drift=GOLD, spin=(1, 1)),
+            dict(verts=LILAC, frames=GOLD, roof=VIOLET, arches=WHITE, drift=WHITE, spin=(2, 1)),
+            dict(verts=WARMW, frames=CRIMSON, roof=GOLD, arches=GOLD, drift=VIOLET, spin=(2, 2),
+                 spheres=VIOLET, flakes=WHITE),
+            dict(verts=WHITE, frames=VIOLET, roof=GOLD, arches=VIOLET, drift=GOLD, spin=(3, 3),
+                 spheres=GOLD, flakes=GOLD, period=3.5),
+        ]
+        st_t = [t for t in (sc.get("stages") or [w0]) if w0 - 0.01 <= t < b0]
         bars_ = [t for t in _sc_bars(w0, b0)] or [w0]
         if bars_[0] > w0 + 0.05:
             bars_.insert(0, w0)
 
-        def _breathe(target, col, t0, fade_in=1.5, sparkle=0):
-            if t0 >= b0:
+        def _breathe(target, col, t0, t1, fade_in=0.0, fade_out=0.0, sparkle=0):
+            if t1 - t0 < 0.5:
                 return
-            # layer 2: below the smooth drifting movement placed on top; runs
-            # 2.5 s into the build and fades there, so the house does not go
-            # black before the fill starts rising (measured 0.007 at 2:43.5)
-            e = _put(target, "sc_on", t0, b0 + 2.5, _sc_pal(col, sparkle=sparkle),
-                     _sc_fade(fade_in, 2.5), layer=2)
-            span = max(1e-3, b0 + 2.5 - t0)
-            pts = []
-            for i, bt in enumerate(bars_ + [b0]):
-                if bt < t0 - 1e-3:
-                    continue
-                pts.append(((bt - t0) / span, 1.0))
-                if i + 1 < len(bars_) + 1:
-                    nxt = (bars_ + [b0])[i + 1] if i + 1 < len(bars_) + 1 else b0
-                    if nxt > bt:
-                        pts.append((((bt + nxt) / 2 - t0) / span, 0.6))
-            if not pts or pts[0][0] > 0:
-                pts.insert(0, (0.0, 0.6))
+            # layer 2: below the smooth drifting movement placed on top
+            e = _put(target, "sc_on", t0, t1, _sc_pal(col, sparkle=sparkle),
+                     _sc_fade(fade_in, fade_out), layer=2)
+            span = max(1e-3, t1 - t0)
+            marks = [t for t in bars_ if t0 - 1e-3 <= t < t1] + [t1]
+            pts = [(0.0, 1.0 if abs(marks[0] - t0) < 0.05 else 0.6)]
+            for i in range(len(marks) - 1):
+                pts.append(((marks[i] - t0) / span, 1.0))
+                pts.append((((marks[i] + marks[i + 1]) / 2 - t0) / span, 0.6))
+            pts.append((1.0, 0.8))
             pts = sorted({round(x, 4): y for x, y in pts if 0 <= x <= 1}.items())
             _set_bright_curve(e, pts)
 
-        for v in _SC_VERTS:
-            _breathe(v, WHITE, w0)
-        if sc.get("frame_from") is not None:
-            for grp in ("Window Verticals", "Window Horizontals"):
-                _breathe(grp, ICE, sc["frame_from"], 2.0, sparkle=70)
-        if sc.get("roof_from") is not None:
-            _breathe("Horizontal C9s", WARM, sc["roof_from"], 2.0)
-        if sc.get("arches_from") is not None:
-            for a in _SC_ARCHES:
-                _breathe(a, WHITE, sc["arches_from"], 2.0)
-        # A LITTLE SMOOTH MOVEMENT ON TOP -- "a bit less static", but "not
-        # rhythmic, just smooth": a gold glow drifting up each vertical, a
-        # white band gliding along the roofline and across the arches, on
-        # their own slow clocks (6-8 s a pass), deliberately NOT on the beat.
-        # The frames sparkle softly (palette sparkles, above).
-        t = w0 + 2.0
-        k = 0
-        while t < b0 - 1.0:
-            nb = min(b0, t + 6.0)
+        seen = set()
+        for i, t0 in enumerate(st_t):
+            S = STAGES[min(i, len(STAGES) - 1)]
+            last = i == len(st_t) - 1
+            t1 = st_t[i + 1] if not last else b0 + 2.5     # last stage fades into the build
+            fo = 2.5 if last else 0.0
+
+            def fin(key):
+                if key in seen:
+                    return 0.0
+                seen.add(key)
+                return 2.0
             for v in _SC_VERTS:
-                _put(v, "strand_up", t, nb, _sc_pal(GOLD),
-                     {"E_SLIDER_Color_Mix1": "30", **_sc_fade(1.0, 1.0)})
-            t, k = nb, k + 1
-        t0r = sc.get("roof_from", w0)
-        t, k = t0r + 1.0, 0
-        while t < b0 - 1.0:
-            nb = min(b0, t + 8.0)
-            _put("Horizontal C9s", "chase_lr" if k % 2 == 0 else "chase_rl", t, nb,
-                 _sc_pal(WHITE), {"E_SLIDER_Color_Mix1": "25", **_sc_fade(1.5, 1.5)})
-            t, k = nb, k + 1
-        if sc.get("arches_from") is not None:
-            t, k = sc["arches_from"] + 2.0, 0
-            while t < b0 - 1.0:
-                nb = min(b0, t + 8.0)
-                for a in _SC_ARCHES:
-                    _sc_arch_leap(a, t, nb, _sc_pal(GOLD), k % 2 == 0,
-                                  {"E_SLIDER_Color_Mix1": "40", **_sc_fade(1.5, 1.5)})
+                _breathe(v, S["verts"], t0, t1, fin("verts"), fo)
+            if "frames" in S:
+                f_ = fin("frames")
+                for grp in ("Window Verticals", "Window Horizontals"):
+                    _breathe(grp, S["frames"], t0, t1, f_, fo, sparkle=70)
+            if "roof" in S:
+                _breathe("Horizontal C9s", S["roof"], t0, t1, fin("roof"), fo)
+            if "arches" in S:
+                f_ = fin("arches")
+                for a_ in _SC_ARCHES:
+                    _breathe(a_, S["arches"], t0, t1, f_, fo)
+            if "flakes" in S:
+                _breathe("Flakes Outline All GRP", S["flakes"], t0, t1, fin("flakes"), fo)
+            mv_end = min(t1, b0)
+            # smooth drift, on its own slow clock: up the verticals...
+            per = S.get("period", 6.0)
+            t, k = t0 + (2.0 if i == 0 else 0.0), 0
+            while t < mv_end - 0.8:
+                nb = min(mv_end, t + per)
+                for v in _SC_VERTS:
+                    _put(v, "strand_up", t, nb, _sc_pal(S["drift"]),
+                         {"E_SLIDER_Color_Mix1": "30", **_sc_fade(min(1.0, per / 4), min(1.0, per / 4))})
                 t, k = nb, k + 1
+            # ...along the roofline and across the arches (8 s a pass)
+            for tgt, col_ in (("roof", WHITE), ("arches", GOLD if S.get("arches") != GOLD else WHITE)):
+                if tgt not in S:
+                    continue
+                t, k = t0 + 0.5, i
+                while t < mv_end - 0.8:
+                    nb = min(mv_end, t + 8.0)
+                    if tgt == "roof":
+                        _put("Horizontal C9s", "chase_lr" if k % 2 == 0 else "chase_rl", t, nb,
+                             _sc_pal(col_), {"E_SLIDER_Color_Mix1": "25", **_sc_fade(1.5, 1.5)})
+                    else:
+                        for a_ in _SC_ARCHES:
+                            _sc_arch_leap(a_, t, nb, _sc_pal(col_), k % 2 == 0,
+                                          {"E_SLIDER_Color_Mix1": "40", **_sc_fade(1.5, 1.5)})
+                    t, k = nb, k + 1
+            # the spinners: arms turning slowly, more arms and a little faster
+            # each stage
+            if "spin" in S:
+                arms, spd = S["spin"]
+                for m in _SC_SPIN:
+                    _put(m, "sc_pin", t0, mv_end, _sc_pal(S.get("arches", WHITE) if arms > 1 else WHITE),
+                         {"E_SLIDER_Pinwheel_Arms": str(arms), "E_SLIDER_Pinwheel_Speed": str(spd),
+                          "E_SLIDER_Pinwheel_Thickness": "12", **_sc_fade(fin("spin"), 0.0)})
+            # the spheres turn strand by strand, slowly
+            if "spheres" in S:
+                t = t0
+                while t < mv_end - 0.8:
+                    nb = min(mv_end, t + 4.0)
+                    _put("Hanging Spheres", "sphere_strands", t, nb, _sc_pal(S["spheres"]),
+                         _sc_fade(0.5, 0.5))
+                    t = nb
         # THE BUILD FILLS THE HOUSE, ONCE: the Rising Light shader across the
         # whole house (Per Preview), its `level` input driven by a value curve
         # from the ground to the top over the guitar build, full as the six
@@ -14576,48 +14614,55 @@ def main():
     # -- fills: a drum fill plays on the outlines -----------------------------
     def _scene_fills(sc):
         """Each big drum fill gets its own visual moment ON THE OUTLINES -- the
-        roofline, the verticals and the window frames -- while the chorus keeps
-        running on everything else. Every beat of the fill the outlines sweep
-        across the house, alternating direction; on the last beat everything
-        rises. (v11 swept bars across the whole display: "I don't like the bars
-        or lines... maybe the same kind of movement on the outlines".)"""
-        cols = sc.get("colours") or ["#FFFFFF"]
-        OUT_GROUPS = {"Horizontal C9s", "C9s", "Corner Verticals", "Window Verticals",
-                      "Window Horizontals", "Roof Lower", "Roof Upper", "Gutters", "Eaves GRP"}
+        roofline segments, the verticals and the window frames -- while the
+        chorus keeps running on everything else.
 
-        def _outline(e):
-            m = e.model_name
-            return (m in OUT_GROUPS or m.startswith(("Vertical Strip", "Single Line-"))
-                    or m.endswith(("/Verticals", "/Horizontals")))
+        All of it MODEL-LEVEL. v12 put the sweeps on outline groups and they
+        lost to a whole-house shader on `ALL Display` running through the fill
+        (Krists: "I just see the big spinning shader across the outlines").
+        A model-level effect beats any group effect, so every outline model
+        gets black underneath for the bar (nothing from the house shows
+        through) and, on top, a wave of light travelling across the house by
+        position -- prop by prop, alternating direction each beat -- and on
+        the last beat everything rises."""
+        cols = sc.get("colours") or ["#FFFFFF"]
+        outl = sorted([m for m in positions if _sc_live(m) and (
+            m.startswith(("Vertical Strip", "Single Line-"))
+            or m.endswith(("/Verticals", "/Horizontals")))], key=_sc_x)
+        verts = [m for m in outl if m.startswith("Vertical Strip")]
         n = 0
         for a, b in sc["spans"]:
-            _sc_slate(effects, a, b, keep=lambda e: not _outline(e), why="drum fill",
-                      split=True)
+            _sc_slate(effects, a, b, keep=lambda e: e.model_name not in outl,
+                      why="drum fill", split=True)
+            for m in outl:
+                _put(m, "off", a, b, _sc_pal("#000000"), layer=6)
             bts = _sc_beats(a, b) or [a]
             for k, t in enumerate(bts):
                 nb = bts[k + 1] if k + 1 < len(bts) else b
+                L = nb - t
                 c1, c2 = cols[k % len(cols)], cols[(k + 1) % len(cols)]
-                wide = {"E_SLIDER_Color_Mix1": "45"}
                 if k == len(bts) - 1:
-                    # the last beat rises: up every vertical, out from the middle
-                    _put("Corner Verticals", "strand_up", t, nb, _sc_pal(c1), wide)
-                    _put("Horizontal C9s", "chase_mid_out", t, nb, _sc_pal(c1, c2), wide)
-                    for grp in ("Window Verticals", "Window Horizontals"):
-                        _put(grp, "chase_mid_out", t, nb, _sc_pal(c2), wide)
+                    # the last beat rises: up every vertical, everything else
+                    # lit and falling away into the downbeat
+                    for v in verts:
+                        _put(v, "strand_up", t, nb, _sc_pal(c1), {"E_SLIDER_Color_Mix1": "60"})
+                    for m in outl:
+                        if m not in verts:
+                            _put(m, "sc_on", t, nb, _sc_pal(c2), _sc_fade(0.0, L * 0.7))
                 else:
-                    key = "chase_lr" if k % 2 == 0 else "chase_rl"
-                    _put("Horizontal C9s", key, t, nb, _sc_pal(c1, c2), wide)
-                    for grp in ("Window Verticals", "Window Horizontals"):
-                        _put(grp, key, t, nb, _sc_pal(c2), wide)
-                    # the verticals answer as a wave travelling the same way
-                    vs = _SC_VERTS if k % 2 == 0 else list(reversed(_SC_VERTS))
-                    step = (nb - t) / max(1, len(vs))
-                    for j, v in enumerate(vs):
-                        _put(v, "sc_on", t + j * step, min(nb, t + j * step + 0.25),
-                             _sc_pal(c1), _sc_fade(0.0, 0.2))
+                    order = outl if k % 2 == 0 else list(reversed(outl))
+                    xs = [_sc_x(m) for m in order]
+                    x0, x1 = min(xs), max(xs)
+                    for m in order:
+                        f = (_sc_x(m) - x0) / max(1e-6, x1 - x0)
+                        if k % 2:
+                            f = 1.0 - f
+                        st = t + f * L * 0.75
+                        _put(m, "sc_on", st, min(nb, st + L * 0.4),
+                             _sc_pal(c1 if m in verts else c2), _sc_fade(0.0, L * 0.3))
                 n += 1
-        print(f"Medley fills: {len(sc['spans'])} drum fills played on the outlines "
-              f"({n} beats), the chorus running on everything else")
+        print(f"Medley fills: {len(sc['spans'])} drum fills on {len(outl)} outline models "
+              f"({n} beats), model-level so no house shader shows through")
 
     # -- hold: the last hit rings out, frozen ----------------------------------
     def _scene_hold(sc):
