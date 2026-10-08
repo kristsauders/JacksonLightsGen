@@ -13999,7 +13999,7 @@ def main():
     # here rather than registered, so no ordinary song can ever pick them.
     from isf_shader import shader_settings as _isf
     for _k, _stem in (("sc_dawn", "Dawn Strings"), ("sc_glints", "Night Glints"),
-                      ("sc_nebula", "Dawn Nebula")):
+                      ("sc_nebula", "Dawn Nebula"), ("sc_rising", "Rising Light")):
         _fs = SHOW_PATH / "Shaders" / f"{_stem}.fs"
         if _fs.exists():
             EFFECTS[_k] = ("Shader", {**_isf(_fs, speed=100), "B_CHOICE_BufferStyle": "Per Model Default"})
@@ -14300,19 +14300,22 @@ def main():
                     _sc_arch_leap(a, t, nb, _sc_pal(GOLD), k % 2 == 0,
                                   {"E_SLIDER_Color_Mix1": "40", **_sc_fade(1.5, 1.5)})
                 t, k = nb, k + 1
-        # THE BUILD FILLS THE HOUSE: ONE slow rise of light from the ground to
-        # the top of the display over the whole guitar build, full exactly as
-        # the six hits begin -- "like the lights are filling up and they get
-        # full to the top right before the big 6 hit drop". One Fill on the
-        # whole-house canvas (Per Preview), its level ramping 4% -> 100%, its
-        # brightness 60% -> 100%. (v10's meteors rose three times over.)
+        # THE BUILD FILLS THE HOUSE, ONCE: the Rising Light shader across the
+        # whole house (Per Preview), its `level` input driven by a value curve
+        # from the ground to the top over the guitar build, full as the six
+        # hits begin. Two deep colours (violet, crimson) flow upward inside it
+        # with breathing sparkles, under a gold crest; held to 85% -- "it's a
+        # build but doesn't need to be full brightness". v10's meteors rose
+        # three times on their own clock; v11's flat white Fill rose once but
+        # was "too simple".
         bts = _sc_beats(b0, w1)
-        e = _put("All", "sc_fill", b0, w1, _sc_pal(WHITE),
-                 {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Fill_Direction": "Up",
-                  "E_VALUECURVE_Fill_Position":
-                  "Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
-                  "Max=100.00|P1=4.00|P2=100.00|RV=TRUE|"})
-        _set_bright_curve(e, [(0.0, 0.6), (1.0, 1.0)])
+        if "sc_rising" in EFFECTS:
+            e = _put("All", "sc_rising", b0, w1, _sc_pal("#5A0FB4", "#B4104E", "#FFB43A"),
+                     {"B_CHOICE_BufferStyle": "Per Preview",
+                      "E_VALUECURVE_SHADERXYZZY_level":
+                      "Active=TRUE|Id=ID_VALUECURVE_SHADERXYZZY_level|Type=Custom|Min=0.00|"
+                      "Max=100.00|RV=TRUE|Values=0.000:0.020;1.000:1.000|"})
+            _set_bright_curve(e, [(0.0, 0.70), (1.0, 0.85)])
         print(f"Medley organ: outlines breathing on {len(bars_)} bars with smooth drifting "
               f"movement on top; the house fills from the ground over the {b1 - b0 + w1 - b1:.1f} s build")
 
@@ -14570,30 +14573,51 @@ def main():
               f"{n_sh} canvases floating on Dawn Nebula until {still:.1f}s, "
               f"fade {f0:.1f}-{f1:.1f}s, no flashing")
 
-    # -- fills: a drum fill owns its bar --------------------------------------
+    # -- fills: a drum fill plays on the outlines -----------------------------
     def _scene_fills(sc):
-        """Each big drum fill gets its own visual moment: the chorus look steps
-        aside for the bar and a bright band sweeps across the whole house on
-        every beat, alternating direction, the last beat rising -- then the
-        next phrase lands on its downbeat."""
+        """Each big drum fill gets its own visual moment ON THE OUTLINES -- the
+        roofline, the verticals and the window frames -- while the chorus keeps
+        running on everything else. Every beat of the fill the outlines sweep
+        across the house, alternating direction; on the last beat everything
+        rises. (v11 swept bars across the whole display: "I don't like the bars
+        or lines... maybe the same kind of movement on the outlines".)"""
         cols = sc.get("colours") or ["#FFFFFF"]
+        OUT_GROUPS = {"Horizontal C9s", "C9s", "Corner Verticals", "Window Verticals",
+                      "Window Horizontals", "Roof Lower", "Roof Upper", "Gutters", "Eaves GRP"}
+
+        def _outline(e):
+            m = e.model_name
+            return (m in OUT_GROUPS or m.startswith(("Vertical Strip", "Single Line-"))
+                    or m.endswith(("/Verticals", "/Horizontals")))
         n = 0
         for a, b in sc["spans"]:
-            _sc_slate(effects, a, b, why="drum fill", split=True)
+            _sc_slate(effects, a, b, keep=lambda e: not _outline(e), why="drum fill",
+                      split=True)
             bts = _sc_beats(a, b) or [a]
             for k, t in enumerate(bts):
                 nb = bts[k + 1] if k + 1 < len(bts) else b
-                last = k == len(bts) - 1
-                d = "up" if last else ("Right" if k % 2 == 0 else "Left")
-                # two bold colour bands to one dark: a fill must read as MORE,
-                # not as a dip (one band in three measured 0.1-0.26 against
-                # a chorus at 0.5)
-                _put("All", "sc_bar", t, nb,
-                     _sc_pal(cols[k % len(cols)], cols[(k + 1) % len(cols)], "#000000"),
-                     {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Bars_Direction": d,
-                      "E_CHECKBOX_Bars_3D": "0"})
+                c1, c2 = cols[k % len(cols)], cols[(k + 1) % len(cols)]
+                wide = {"E_SLIDER_Color_Mix1": "45"}
+                if k == len(bts) - 1:
+                    # the last beat rises: up every vertical, out from the middle
+                    _put("Corner Verticals", "strand_up", t, nb, _sc_pal(c1), wide)
+                    _put("Horizontal C9s", "chase_mid_out", t, nb, _sc_pal(c1, c2), wide)
+                    for grp in ("Window Verticals", "Window Horizontals"):
+                        _put(grp, "chase_mid_out", t, nb, _sc_pal(c2), wide)
+                else:
+                    key = "chase_lr" if k % 2 == 0 else "chase_rl"
+                    _put("Horizontal C9s", key, t, nb, _sc_pal(c1, c2), wide)
+                    for grp in ("Window Verticals", "Window Horizontals"):
+                        _put(grp, key, t, nb, _sc_pal(c2), wide)
+                    # the verticals answer as a wave travelling the same way
+                    vs = _SC_VERTS if k % 2 == 0 else list(reversed(_SC_VERTS))
+                    step = (nb - t) / max(1, len(vs))
+                    for j, v in enumerate(vs):
+                        _put(v, "sc_on", t + j * step, min(nb, t + j * step + 0.25),
+                             _sc_pal(c1), _sc_fade(0.0, 0.2))
                 n += 1
-        print(f"Medley fills: {len(sc['spans'])} drum fills shown as {n} house-wide sweeps")
+        print(f"Medley fills: {len(sc['spans'])} drum fills played on the outlines "
+              f"({n} beats), the chorus running on everything else")
 
     # -- hold: the last hit rings out, frozen ----------------------------------
     def _scene_hold(sc):
@@ -14621,10 +14645,15 @@ def main():
                 placed.append(_put(m, shk, w0, w1, _sc_pal(*cols),
                                    {"E_SLIDER_Shader_Speed": "0",
                                     "E_VALUECURVE_Shader_Speed": "Active=FALSE|"}))
-        # decay like a struck chord: quick at first, then a long tail to black
+        # decay WITH the sound: the guitar holds full level and cuts off, so
+        # the light stays up and falls away late (1 - x^1.5), reaching black
+        # at `dark_from` -- (1-x)^1.8 was dark before the sound ended
+        dk = float(sc.get("dark_from", w1))
         span = w1 - w0
+        fd = (dk - w0) / span
         for e in placed:
-            pts = [(x, (1.0 - x) ** 1.8) for x in np.linspace(0, 1, 12)]
+            pts = [(x * fd, max(0.0, 1.0 - x ** 1.5)) for x in np.linspace(0, 1, 12)]
+            pts.append((1.0, 0.0))
             _set_bright_curve(e, pts)
         print(f"Medley hold: {len(placed)} props frozen into one picture, decaying "
               f"{w0:.1f}-{w1:.1f}s")

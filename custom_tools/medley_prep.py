@@ -132,7 +132,8 @@ def design(mix: str) -> None:
                 if key == "swells":
                     return [[conv(x) for x in sw] for sw in v]
                 if key in ("drop", "end", "peak", "frame_from", "roof_from",
-                           "arches_from", "build2", "rise_from", "still_from"):
+                           "arches_from", "build2", "rise_from", "still_from",
+                           "dark_from"):
                     return conv(v)
                 return v
             out["scenes"] = [{k: _sc(v, k) for k, v in sc.items()} for sc in d["scenes"]]

@@ -107,8 +107,10 @@ DESIGN: dict[str, dict] = {
         # After the drop, four looks for four 8-bar phrases (v11 -- "we're
         # just doing the same look the whole time"): the drop, "I feel my life
         # has just begun", "It can't just be with anyone", "It's got to be
-        # with you"; then the final guitar hit at 3:54.94 rings out. The song
-        # ends at 4:03.11 (was 4:10.69, five seconds into Bluey's own beat).
+        # with you"; then the final guitar hit at 3:54.94 rings out -- the
+        # guitar and bass stems hold full level to 4:04.3 and cut together --
+        # and the song ends at 4:05.03 where Bluey's drums land (was 4:10.69,
+        # five seconds into Bluey's own beat; then 4:03.11, still too early).
         "sections": [(95.89, "intro"), (103.20, "verse"), (163.47, "build"),
                      (171.26, "build"), (179.73, "chorus"), (194.62, "chorus"),
                      (209.25, "chorus"), (223.94, "chorus"), (234.94, "outro")],
@@ -158,7 +160,7 @@ DESIGN: dict[str, dict] = {
                        [229.42, 231.28], [233.10, 234.94]]},
             # THE LAST HIT rings out: the house freezes into one still picture
             # and decays with the guitar, dark before Bluey's first words.
-            {"kind": "hold", "window": [234.94, 243.11],
+            {"kind": "hold", "window": [234.94, 245.03], "dark_from": 244.40,
              "colours": ["#FFC21A", "#FF1F8E", "#FFFFFF"]},
         ],
         "drops": [179.732],
@@ -184,12 +186,11 @@ DESIGN: dict[str, dict] = {
                      "bingo": ["#FF8C1A", "#FFD27A", "#2E8BFF"]},
         "palette_family": ["bluey", "bingo"],
         "shader_pool": ["halftone_pulse", "sequin_flip", "zoetrope_slats"],
-        # Starts at 4:03.11 now, on the dialogue ("We're ready, Mingo!");
-        # the beat lands at 4:05.03.
-        "sections": [(243.11, "intro"), (245.03, "verse"), (256.36, "break"),
+        # Starts at 4:05.03, on its drums (the Be With You guitar rings to
+        # 4:04.3; nothing should start in the silence before the beat).
+        "sections": [(245.03, "verse"), (256.36, "break"),
                      (263.93, "chorus"), (271.01, "break"), (279.04, "chorus")],
         "section_look": {
-            243.11: {"palette": "bingo", "shader": "shader_zoetrope_slats"},
             245.03: {"palette": "bluey", "shader": "shader_sequin_flip"},
             256.36: {"palette": "bingo", "shader": "shader_zoetrope_slats"},
             263.93: {"palette": "bluey", "shader": "shader_halftone_pulse"},
