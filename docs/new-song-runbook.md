@@ -899,6 +899,18 @@ Lessons, each measured on this mix:
 - **One rise per build.** Particle effects repeat on their own clock (meteors
   rose three times over a 15 s build); a single Fill whose level ramps over the
   whole build rises exactly once and lands full on the hit.
+- **A scene that must WIN over a song's look has to be model-level.** The
+  drum-fill sweeps were group-level (Horizontal C9s, Window Verticals) and the
+  song's whole-house shader on `ALL Display` -- also group-level, starting
+  mid-fill -- simply won: "I just see the big spinning shader". Two group
+  effects on the same lights have no reliable winner; a model-level effect
+  beats every group effect. Put an `off` under the scene on each model (so
+  nothing shows through) and draw the gesture per model, ordering by x to
+  make it travel across the house.
+- **A long minimal passage still needs a shape.** 68 s of one breathing look
+  read as "the same visual for too long". Stages on bar lines, each changing
+  colours and adding ONE element, keep it minimal and build tension (lit
+  2% -> 24%, motion 0.003 -> 0.047 over the organ).
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then
