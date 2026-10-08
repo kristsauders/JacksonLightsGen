@@ -100,21 +100,30 @@ DESIGN: dict[str, dict] = {
     "02 Be With You": {
         "palettes": {"cathedral": ["#6A1FB0", "#E8B54A", "#9E1B32"],
                      "wowsignal": ["#00E5FF", "#FF2BD6", "#FFFFFF"],
-                     "nebula":    ["#3A0CA3", "#00E5FF", "#FFD700"]},
+                     "nebula":    ["#3A0CA3", "#00E5FF", "#FFD700"],
+                     "beam":      ["#FFC21A", "#FF1F8E", "#FFFFFF"]},
         "palette_family": ["cathedral", "wowsignal", "nebula"],
         "shader_pool": ["stained_glass", "black_cherry_cosmos", "space_spinning", "hex_3d_spiral"],
+        # After the drop, four looks for four 8-bar phrases (v11 -- "we're
+        # just doing the same look the whole time"): the drop, "I feel my life
+        # has just begun", "It can't just be with anyone", "It's got to be
+        # with you"; then the final guitar hit at 3:54.94 rings out. The song
+        # ends at 4:03.11 (was 4:10.69, five seconds into Bluey's own beat).
         "sections": [(95.89, "intro"), (103.20, "verse"), (163.47, "build"),
-                     (171.26, "build"), (179.73, "chorus"), (193.71, "chorus"),
-                     (239.04, "break"), (245.49, "build")],
+                     (171.26, "build"), (179.73, "chorus"), (194.62, "chorus"),
+                     (209.25, "chorus"), (223.94, "chorus"), (234.94, "outro")],
         "section_look": {
             95.89:  {"palette": "cathedral", "shader": "shader_stained_glass"},
             103.20: {"palette": "cathedral", "shader": "shader_stained_glass"},
             163.47: {"palette": "nebula",    "shader": "shader_hex_3d_spiral"},
             171.26: {"palette": "nebula",    "shader": "shader_space_spinning"},
             179.73: {"palette": "wowsignal", "shader": "shader_hex_3d_spiral"},
-            193.71: {"palette": "wowsignal", "shader": "shader_stained_glass"},
-            239.04: {"palette": "cathedral", "shader": "shader_stained_glass"},
-            245.49: {"palette": "nebula",    "shader": "shader_black_cherry_cosmos"},
+            194.62: {"palette": "cathedral", "shader": "shader_stained_glass"},
+            # the two BRIGHT shaders alternate, each phrase in its own colours
+            # (Space Spinning measured near-black on the matrices here)
+            209.25: {"palette": "nebula",    "shader": "shader_hex_3d_spiral"},
+            223.94: {"palette": "beam",      "shader": "shader_stained_glass"},
+            234.94: {"palette": "beam",      "shader": "shader_stained_glass"},
         },
         # THE ORGAN (v7): full brightness, small share lit -- white verticals,
         # violet window frames, a gold roofline and later the arches, each
@@ -141,6 +150,16 @@ DESIGN: dict[str, dict] = {
             {"kind": "frenzy",
              "hits": [178.160, 178.375, 178.594, 178.829, 179.053, 179.288],
              "drop": 179.732},
+            # THE FILLS: drum-stem bars with 3-4 hits per beat. Each owns its
+            # bar: a band sweeping across the whole house on every beat, back
+            # and forth, the last beat rising -- then the phrase lands.
+            {"kind": "fills", "colours": ["#FFFFFF", "#00E5FF", "#FF2BD6", "#FFC21A"],
+             "spans": [[190.96, 192.79], [200.10, 201.95], [220.27, 222.11],
+                       [229.42, 231.28], [233.10, 234.94]]},
+            # THE LAST HIT rings out: the house freezes into one still picture
+            # and decays with the guitar, dark before Bluey's first words.
+            {"kind": "hold", "window": [234.94, 243.11],
+             "colours": ["#FFC21A", "#FF1F8E", "#FFFFFF"]},
         ],
         "drops": [179.732],
         # The reveal chorus wears the BRIGHTEST shader of the song. Black Cherry
@@ -165,10 +184,13 @@ DESIGN: dict[str, dict] = {
                      "bingo": ["#FF8C1A", "#FFD27A", "#2E8BFF"]},
         "palette_family": ["bluey", "bingo"],
         "shader_pool": ["halftone_pulse", "sequin_flip", "zoetrope_slats"],
-        "sections": [(250.69, "intro"), (256.36, "break"), (263.93, "chorus"),
-                     (271.01, "break"), (279.04, "chorus")],
+        # Starts at 4:03.11 now, on the dialogue ("We're ready, Mingo!");
+        # the beat lands at 4:05.03.
+        "sections": [(243.11, "intro"), (245.03, "verse"), (256.36, "break"),
+                     (263.93, "chorus"), (271.01, "break"), (279.04, "chorus")],
         "section_look": {
-            250.69: {"palette": "bluey", "shader": "shader_sequin_flip"},
+            243.11: {"palette": "bingo", "shader": "shader_zoetrope_slats"},
+            245.03: {"palette": "bluey", "shader": "shader_sequin_flip"},
             256.36: {"palette": "bingo", "shader": "shader_zoetrope_slats"},
             263.93: {"palette": "bluey", "shader": "shader_halftone_pulse"},
             271.01: {"palette": "bingo", "shader": "shader_zoetrope_slats"},

@@ -127,6 +127,8 @@ def design(mix: str) -> None:
             def _sc(v, key):
                 if key in ("window", "build", "fade", "hits", "chords", "strokes"):
                     return [conv(x) for x in v]
+                if key == "spans":
+                    return [[conv(x) for x in sp] for sp in v]
                 if key == "swells":
                     return [[conv(x) for x in sw] for sw in v]
                 if key in ("drop", "end", "peak", "frame_from", "roof_from",

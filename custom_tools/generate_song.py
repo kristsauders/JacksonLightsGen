@@ -14060,18 +14060,73 @@ def main():
         add(target, lay, key, s_ms, e_ms, pal, {**(extra or {}), "X_Scene": tag})
         return effects[-1]
 
-    def _sc_slate(effects, w0, w1, keep=None, why="scene"):
+    def _crop_curves(text: str, f0: float, f1: float) -> str:
+        """Re-map every value curve in a settings/palette string from its old
+        span onto the sub-span [f0, f1] (fractions of the old span), so a
+        cropped piece keeps the curve it had at those moments. Custom curves
+        are resampled; Ramp curves get new end points."""
+        def one(m):
+            vc = m.group(0)
+            if "Type=Custom" in vc:
+                mv = re.search(r"Values=([^|]*)", vc)
+                if not mv or not mv.group(1):
+                    return vc
+                pts = sorted((float(a), float(b)) for a, b in
+                             (x.split(":") for x in mv.group(1).split(";") if ":" in x))
+                xs = [p_[0] for p_ in pts]; ys = [p_[1] for p_ in pts]
+                new = [(0.0, float(np.interp(f0, xs, ys)))]
+                new += [((x - f0) / (f1 - f0), y) for x, y in pts if f0 < x < f1]
+                new += [(1.0, float(np.interp(f1, xs, ys)))]
+                vals = ";".join(f"{x:.3f}:{y:.3f}" for x, y in new)
+                return vc[:mv.start(1)] + vals + vc[mv.end(1):]
+            if "Type=Ramp" in vc:
+                g = lambda k, d: float((re.search(rf"{k}=([-0-9.]+)", vc) or [0, d])[1])
+                p1, p2 = g("P1", 0.0), g("P2", 100.0)
+                n1, n2 = p1 + (p2 - p1) * f0, p1 + (p2 - p1) * f1
+                vc = re.sub(r"P1=[-0-9.]+", f"P1={n1:.2f}", vc) if "P1=" in vc else vc.replace("Type=Ramp", f"Type=Ramp|P1={n1:.2f}")
+                vc = re.sub(r"P2=[-0-9.]+", f"P2={n2:.2f}", vc) if "P2=" in vc else vc.replace("Type=Ramp", f"Type=Ramp|P2={n2:.2f}")
+                return vc
+            return vc
+        return re.sub(r"Active=TRUE\|[^,]*", one, text)
+
+    def _crop(e, s_ms: int, e_ms: int):
+        """A copy of `e` covering only [s_ms, e_ms], curves re-mapped."""
+        span = max(1, e.end_time_ms - e.start_time_ms)
+        f0 = (s_ms - e.start_time_ms) / span
+        f1 = (e_ms - e.start_time_ms) / span
+        st = {k: (_crop_curves(v, f0, f1) if isinstance(v, str) and "Active=TRUE" in v else v)
+              for k, v in e.settings.items()}
+        if f0 > 0:
+            st["T_TEXTCTRL_Fadein"] = "0.00"
+        pal = e.palette
+        if pal is not None and pal.extra_parts:
+            pal = pal.model_copy(update={"extra_parts": [
+                (_crop_curves(x, f0, f1) if "Active=TRUE" in x else x) for x in pal.extra_parts]})
+        return e.model_copy(update={"start_time_ms": s_ms, "end_time_ms": e_ms,
+                                    "settings": st, "palette": pal})
+
+    def _sc_slate(effects, w0, w1, keep=None, why="scene", split=False):
         """Clear [w0, w1) seconds, in place. A bed running INTO the window
         stops at it; one starting inside and running well past starts after
-        it; everything else inside goes."""
+        it; everything else inside goes. With `split`, a bed running right
+        THROUGH the window is cut in two and resumes after it, its curves
+        re-mapped -- for short windows inside a song (a drum fill), where
+        cutting it would leave the rest of the phrase dark (measured: the
+        chorus went to 0.04 after each fill)."""
         a_ms, b_ms = int(w0 * 1000), int(w1 * 1000)
         kill, moved = set(), 0
+        tails = []
         for e in effects:
             if e.end_time_ms <= a_ms or e.start_time_ms >= b_ms:
                 continue
             if keep and keep(e):
                 continue
             if e.start_time_ms < a_ms:
+                if split and e.end_time_ms > b_ms + 200:
+                    tails.append(_crop(e, b_ms, e.end_time_ms))
+                    e.settings = {**e.settings, "T_TEXTCTRL_Fadeout": "0.00"}
+                    head = _crop(e, e.start_time_ms, a_ms)
+                    e.settings, e.palette = head.settings, head.palette
                 e.end_time_ms = a_ms
             elif e.end_time_ms > b_ms + 200:
                 e.start_time_ms = b_ms
@@ -14080,6 +14135,7 @@ def main():
                 kill.add(id(e))
         if kill:
             effects[:] = drop_effects(effects, kill, f"medley scene: {why}")
+        effects.extend(tails)
         return len(kill), moved
 
     def _sc_beats(a: float, b: float) -> list[float]:
@@ -14186,10 +14242,12 @@ def main():
         def _breathe(target, col, t0, fade_in=1.5, sparkle=0):
             if t0 >= b0:
                 return
-            # layer 2: below the smooth drifting movement placed on top
-            e = _put(target, "sc_on", t0, b0, _sc_pal(col, sparkle=sparkle),
-                     _sc_fade(fade_in, 0.0), layer=2)
-            span = max(1e-3, b0 - t0)
+            # layer 2: below the smooth drifting movement placed on top; runs
+            # 2.5 s into the build and fades there, so the house does not go
+            # black before the fill starts rising (measured 0.007 at 2:43.5)
+            e = _put(target, "sc_on", t0, b0 + 2.5, _sc_pal(col, sparkle=sparkle),
+                     _sc_fade(fade_in, 2.5), layer=2)
+            span = max(1e-3, b0 + 2.5 - t0)
             pts = []
             for i, bt in enumerate(bars_ + [b0]):
                 if bt < t0 - 1e-3:
@@ -14242,39 +14300,21 @@ def main():
                     _sc_arch_leap(a, t, nb, _sc_pal(GOLD), k % 2 == 0,
                                   {"E_SLIDER_Color_Mix1": "40", **_sc_fade(1.5, 1.5)})
                 t, k = nb, k + 1
-        # ...and the outlines CARRY ON under the build, rising 62% -> 90% into
-        # the hits, on a layer below the rhythm so each beat reads as a bump.
-        # Without this base the build measured 2-3% lit after an organ at
-        # 20%: a drop-out where the music builds.
-        for tgt, col in ([(v, WHITE) for v in _SC_VERTS] +
-                         [("Window Verticals", ICE), ("Window Horizontals", ICE),
-                          ("Horizontal C9s", WARM)] + [(a, WHITE) for a in _SC_ARCHES]):
-            e = _put(tgt, "sc_on", b0, w1, _sc_pal(col), layer=4)
-            _set_bright_curve(e, [(0.0, 0.62), (1.0, 0.90)])
-        # THE BUILD RISES FROM THE GROUND: meteors travelling UP the whole
-        # house and every vertical, in three stages that grow denser and
-        # faster into the six hits ("a slow build upwards from the bottom like
-        # a reverse meteor"). Replaces v5-v9's beat pulses on the outlines.
+        # THE BUILD FILLS THE HOUSE: ONE slow rise of light from the ground to
+        # the top of the display over the whole guitar build, full exactly as
+        # the six hits begin -- "like the lights are filling up and they get
+        # full to the top right before the big 6 hit drop". One Fill on the
+        # whole-house canvas (Per Preview), its level ramping 4% -> 100%, its
+        # brightness 60% -> 100%. (v10's meteors rose three times over.)
         bts = _sc_beats(b0, w1)
-        stages = [(b0, sc.get("build2", (b0 + w1) / 2)), (sc.get("build2", (b0 + w1) / 2), (sc.get("build2", (b0 + w1) / 2) + w1) / 2), (((sc.get("build2", (b0 + w1) / 2) + w1) / 2), w1)]
-        for i, (sa, sb) in enumerate(stages):
-            if sb - sa < 0.5:
-                continue
-            # PER MODEL: on the whole-house canvas each meteor covered big
-            # cells and the build measured 0.34 -> 0.78 of full brightness --
-            # brighter than the organ by far, stealing the hits' contrast.
-            house = {"E_CHOICE_Meteors_Effect": "Up", "E_SLIDER_Meteors_Count": str((2, 4, 7)[i]),
-                     "E_SLIDER_Meteors_Speed": str((8, 13, 20)[i]), "E_SLIDER_Meteors_Length": "35",
-                     "B_CHOICE_BufferStyle": "Per Model Default"}
-            _put("All", "meteors_down", sa, sb, _sc_pal(WHITE, ICE, WARM), house, layer=0)
-            for v in _SC_VERTS:
-                _put(v, "meteors_down", sa, sb, _sc_pal(WHITE, WARM),
-                     {"E_CHOICE_Meteors_Effect": "Up", "E_SLIDER_Meteors_Count": str((2, 3, 5)[i]),
-                      "E_SLIDER_Meteors_Speed": str((10, 15, 22)[i]),
-                      "E_SLIDER_Meteors_Length": "50", "B_CHOICE_BufferStyle": "Per Model Single Line"},
-                     layer=0)
+        e = _put("All", "sc_fill", b0, w1, _sc_pal(WHITE),
+                 {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Fill_Direction": "Up",
+                  "E_VALUECURVE_Fill_Position":
+                  "Active=TRUE|Id=ID_VALUECURVE_Fill_Position|Type=Ramp|Min=0.00|"
+                  "Max=100.00|P1=4.00|P2=100.00|RV=TRUE|"})
+        _set_bright_curve(e, [(0.0, 0.6), (1.0, 1.0)])
         print(f"Medley organ: outlines breathing on {len(bars_)} bars with smooth drifting "
-              f"movement on top, a rising-meteor build of {len(bts)} beats")
+              f"movement on top; the house fills from the ground over the {b1 - b0 + w1 - b1:.1f} s build")
 
     # -- frenzy: the six hits and the drop --------------------------------------
     def _scene_frenzy(sc):
@@ -14530,10 +14570,70 @@ def main():
               f"{n_sh} canvases floating on Dawn Nebula until {still:.1f}s, "
               f"fade {f0:.1f}-{f1:.1f}s, no flashing")
 
+    # -- fills: a drum fill owns its bar --------------------------------------
+    def _scene_fills(sc):
+        """Each big drum fill gets its own visual moment: the chorus look steps
+        aside for the bar and a bright band sweeps across the whole house on
+        every beat, alternating direction, the last beat rising -- then the
+        next phrase lands on its downbeat."""
+        cols = sc.get("colours") or ["#FFFFFF"]
+        n = 0
+        for a, b in sc["spans"]:
+            _sc_slate(effects, a, b, why="drum fill", split=True)
+            bts = _sc_beats(a, b) or [a]
+            for k, t in enumerate(bts):
+                nb = bts[k + 1] if k + 1 < len(bts) else b
+                last = k == len(bts) - 1
+                d = "up" if last else ("Right" if k % 2 == 0 else "Left")
+                # two bold colour bands to one dark: a fill must read as MORE,
+                # not as a dip (one band in three measured 0.1-0.26 against
+                # a chorus at 0.5)
+                _put("All", "sc_bar", t, nb,
+                     _sc_pal(cols[k % len(cols)], cols[(k + 1) % len(cols)], "#000000"),
+                     {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Bars_Direction": d,
+                      "E_CHECKBOX_Bars_3D": "0"})
+                n += 1
+        print(f"Medley fills: {len(sc['spans'])} drum fills shown as {n} house-wide sweeps")
+
+    # -- hold: the last hit rings out, frozen ----------------------------------
+    def _scene_hold(sc):
+        """A final hit that rings out gets ONE still picture that decays with
+        the sound: every prop a static pattern of the song's last colours,
+        the canvases its last shader frozen (speed 0), dimming to black."""
+        w0, w1 = sc["window"]
+        _sc_slate(effects, w0, w1, why="final hit rings out")
+        cols = sc.get("colours") or ["#FFFFFF"]
+        placed = []
+        for i, m in enumerate(_SC_PROPS):
+            if m in _SC_CANVAS:
+                continue
+            rot = cols[i % len(cols):] + cols[:i % len(cols)]
+            placed.append(_put(m, "sc_bar", w0, w1, _sc_pal(*rot),
+                               {"E_TEXTCTRL_Bars_Cycles": "0", "E_SLIDER_Bars_BarCount": "2",
+                                "E_CHECKBOX_Bars_3D": "0"}))
+        look = None
+        for _k, _v in (MEDLEY.get("section_look") or {}).items():
+            if float(_k) <= w0 + 0.5 and (look is None or float(_k) > look[0]):
+                look = (float(_k), _v)
+        shk = look[1].get("shader") if look else None
+        if shk in EFFECTS:
+            for m in _SC_CANVAS:
+                placed.append(_put(m, shk, w0, w1, _sc_pal(*cols),
+                                   {"E_SLIDER_Shader_Speed": "0",
+                                    "E_VALUECURVE_Shader_Speed": "Active=FALSE|"}))
+        # decay like a struck chord: quick at first, then a long tail to black
+        span = w1 - w0
+        for e in placed:
+            pts = [(x, (1.0 - x) ** 1.8) for x in np.linspace(0, 1, 12)]
+            _set_bright_curve(e, pts)
+        print(f"Medley hold: {len(placed)} props frozen into one picture, decaying "
+              f"{w0:.1f}-{w1:.1f}s")
+
     def _g_medley_scenes(effects):
         for sc in MEDLEY.get("scenes") or []:
             {"teaser": _scene_teaser, "organ": _scene_organ, "frenzy": _scene_frenzy,
-             "works": _scene_works, "horizon": _scene_horizon}[sc["kind"]](sc)
+             "works": _scene_works, "horizon": _scene_horizon, "fills": _scene_fills,
+             "hold": _scene_hold}[sc["kind"]](sc)
         return effects
 
     def _g_no_dead_props(effects):

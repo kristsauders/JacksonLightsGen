@@ -884,6 +884,21 @@ Lessons, each measured on this mix:
   whole-house Per Preview canvas lit 50-78% of the display (big cells, like
   the twinkle); per model, the same build rose 0.15 -> 0.38. Pinwheel speed is
   steep: 3 spun six arms 0.40 of the prop per half second; 1 drifts.
+- **Put the song cut where the NEXT song begins, not where Shazam flips.** Be
+  With You's final hit rings out from 3:54.9; Bluey's dialogue starts 4:02 and
+  its beat 4:05.0 -- but the cut sat at 4:10.7, so Be With You's look ran five
+  seconds into Bluey. A cut belongs in the gap (4:03.1). Check the bar map and
+  lyrics at every boundary for an earlier start than the fingerprint gives.
+- **A short scene inside a song must SPLIT the beds running through it**, not
+  cut them, or the rest of the phrase goes dark (measured 0.04 after a drum
+  fill). `_sc_slate(..., split=True)` re-maps each piece's value curves onto
+  its sub-span (Custom resampled, Ramp end points recomputed).
+- **Drum fills from the drum stem**: count onsets per beat; bars with 3-4 per
+  beat at phrase ends are the fills. Show one as MORE than the chorus (two
+  colour bands to one dark), never as a dip.
+- **One rise per build.** Particle effects repeat on their own clock (meteors
+  rose three times over a 15 s build); a single Fill whose level ramps over the
+  whole build rises exactly once and lands full on the hit.
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then
