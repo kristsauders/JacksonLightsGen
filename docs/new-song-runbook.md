@@ -875,6 +875,15 @@ Lessons, each measured on this mix:
 - **Tune a shader's colour balance by measuring it.** Dawn Nebula's gold went
   10% -> 55% -> ~33% with two threshold changes; fbm values bunch near 0.5,
   so small threshold shifts swing coverage a lot.
+- **Freezing a moving pattern without a jump**: a Bars pattern's position is
+  cycles x elapsed fraction, so give the moving copy a WHOLE number of cycles
+  over its span and the resting copy (0 cycles) starts exactly where it ended.
+  A pinwheel's angle cannot be landed that way -- crossfade (1.5 s) into the
+  still copy on the layer below. A shader stops cleanly by its speed curve.
+- **Buffer scale decides how much a particle effect lights.** Meteors on the
+  whole-house Per Preview canvas lit 50-78% of the display (big cells, like
+  the twinkle); per model, the same build rose 0.15 -> 0.38. Pinwheel speed is
+  steep: 3 spun six arms 0.40 of the prop per half second; 1 drifts.
 - **The owner's ear beats every detector on WHERE things happen.** Three of my
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then

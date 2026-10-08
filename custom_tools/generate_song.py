@@ -14183,10 +14183,12 @@ def main():
         if bars_[0] > w0 + 0.05:
             bars_.insert(0, w0)
 
-        def _breathe(target, col, t0, fade_in=1.5):
+        def _breathe(target, col, t0, fade_in=1.5, sparkle=0):
             if t0 >= b0:
                 return
-            e = _put(target, "sc_on", t0, b0, _sc_pal(col), _sc_fade(fade_in, 0.0))
+            # layer 2: below the smooth drifting movement placed on top
+            e = _put(target, "sc_on", t0, b0, _sc_pal(col, sparkle=sparkle),
+                     _sc_fade(fade_in, 0.0), layer=2)
             span = max(1e-3, b0 - t0)
             pts = []
             for i, bt in enumerate(bars_ + [b0]):
@@ -14206,12 +14208,40 @@ def main():
             _breathe(v, WHITE, w0)
         if sc.get("frame_from") is not None:
             for grp in ("Window Verticals", "Window Horizontals"):
-                _breathe(grp, ICE, sc["frame_from"], 2.0)
+                _breathe(grp, ICE, sc["frame_from"], 2.0, sparkle=70)
         if sc.get("roof_from") is not None:
             _breathe("Horizontal C9s", WARM, sc["roof_from"], 2.0)
         if sc.get("arches_from") is not None:
             for a in _SC_ARCHES:
                 _breathe(a, WHITE, sc["arches_from"], 2.0)
+        # A LITTLE SMOOTH MOVEMENT ON TOP -- "a bit less static", but "not
+        # rhythmic, just smooth": a gold glow drifting up each vertical, a
+        # white band gliding along the roofline and across the arches, on
+        # their own slow clocks (6-8 s a pass), deliberately NOT on the beat.
+        # The frames sparkle softly (palette sparkles, above).
+        t = w0 + 2.0
+        k = 0
+        while t < b0 - 1.0:
+            nb = min(b0, t + 6.0)
+            for v in _SC_VERTS:
+                _put(v, "strand_up", t, nb, _sc_pal(GOLD),
+                     {"E_SLIDER_Color_Mix1": "30", **_sc_fade(1.0, 1.0)})
+            t, k = nb, k + 1
+        t0r = sc.get("roof_from", w0)
+        t, k = t0r + 1.0, 0
+        while t < b0 - 1.0:
+            nb = min(b0, t + 8.0)
+            _put("Horizontal C9s", "chase_lr" if k % 2 == 0 else "chase_rl", t, nb,
+                 _sc_pal(WHITE), {"E_SLIDER_Color_Mix1": "25", **_sc_fade(1.5, 1.5)})
+            t, k = nb, k + 1
+        if sc.get("arches_from") is not None:
+            t, k = sc["arches_from"] + 2.0, 0
+            while t < b0 - 1.0:
+                nb = min(b0, t + 8.0)
+                for a in _SC_ARCHES:
+                    _sc_arch_leap(a, t, nb, _sc_pal(GOLD), k % 2 == 0,
+                                  {"E_SLIDER_Color_Mix1": "40", **_sc_fade(1.5, 1.5)})
+                t, k = nb, k + 1
         # ...and the outlines CARRY ON under the build, rising 62% -> 90% into
         # the hits, on a layer below the rhythm so each beat reads as a bump.
         # Without this base the build measured 2-3% lit after an organ at
@@ -14221,33 +14251,30 @@ def main():
                           ("Horizontal C9s", WARM)] + [(a, WHITE) for a in _SC_ARCHES]):
             e = _put(tgt, "sc_on", b0, w1, _sc_pal(col), layer=4)
             _set_bright_curve(e, [(0.0, 0.62), (1.0, 0.90)])
-        # THE BUILD: everything outlined goes rhythmic.
+        # THE BUILD RISES FROM THE GROUND: meteors travelling UP the whole
+        # house and every vertical, in three stages that grow denser and
+        # faster into the six hits ("a slow build upwards from the bottom like
+        # a reverse meteor"). Replaces v5-v9's beat pulses on the outlines.
         bts = _sc_beats(b0, w1)
-        half = max(1, len(_SC_VERTS) // 2)
-        for k, t in enumerate(bts):
-            nb = bts[k + 1] if k + 1 < len(bts) else w1
-            fast = t >= sc.get("build2", w1)
-            side = _SC_VERTS[:half] if k % 2 == 0 else _SC_VERTS[half:]
-            for v in (_SC_VERTS if fast else side):
-                _put(v, "sc_on", t, nb, _sc_pal(WHITE), _sc_fade(0.0, (nb - t) * 0.7))
-            on_bar = t in set(_sc_bars(b0, w1))
-            if fast or on_bar:
-                _put("Horizontal C9s", "chase_lr" if k % 2 == 0 else "chase_rl", t,
-                     t + (nb - t) * (1 if fast else 4), _sc_pal(WARM), _sc_fade(0.0, 0.2))
-                for a in _SC_ARCHES:
-                    _sc_arch_leap(a, t, t + (nb - t) * (1 if fast else 2), _sc_pal(WHITE),
-                                  k % 2 == 0, _sc_fade(0.0, 0.15))
-            if fast:
-                for grp in ("GE Insane Cane Outlilne GRP", "Flakes Outline All GRP",
-                            "Window Verticals", "Window Horizontals"):
-                    _put(grp, "sc_on", t, nb, _sc_pal(ICE if k % 2 else WHITE),
-                         _sc_fade(0.0, (nb - t) * 0.6))
-        if sc.get("rise_from") is not None:
-            _put("All", "sc_bar", sc["rise_from"], w1, _sc_thin(WHITE, 6),
-                 {"B_CHOICE_BufferStyle": "Per Preview", "E_CHOICE_Bars_Direction": "up",
-                  "E_TEXTCTRL_Bars_Cycles": "2.0"})
-        print(f"Medley organ: outlines breathing on {len(bars_)} bars, "
-              f"build of {len(bts)} beats, colour held back for the hits")
+        stages = [(b0, sc.get("build2", (b0 + w1) / 2)), (sc.get("build2", (b0 + w1) / 2), (sc.get("build2", (b0 + w1) / 2) + w1) / 2), (((sc.get("build2", (b0 + w1) / 2) + w1) / 2), w1)]
+        for i, (sa, sb) in enumerate(stages):
+            if sb - sa < 0.5:
+                continue
+            # PER MODEL: on the whole-house canvas each meteor covered big
+            # cells and the build measured 0.34 -> 0.78 of full brightness --
+            # brighter than the organ by far, stealing the hits' contrast.
+            house = {"E_CHOICE_Meteors_Effect": "Up", "E_SLIDER_Meteors_Count": str((2, 4, 7)[i]),
+                     "E_SLIDER_Meteors_Speed": str((8, 13, 20)[i]), "E_SLIDER_Meteors_Length": "35",
+                     "B_CHOICE_BufferStyle": "Per Model Default"}
+            _put("All", "meteors_down", sa, sb, _sc_pal(WHITE, ICE, WARM), house, layer=0)
+            for v in _SC_VERTS:
+                _put(v, "meteors_down", sa, sb, _sc_pal(WHITE, WARM),
+                     {"E_CHOICE_Meteors_Effect": "Up", "E_SLIDER_Meteors_Count": str((2, 3, 5)[i]),
+                      "E_SLIDER_Meteors_Speed": str((10, 15, 22)[i]),
+                      "E_SLIDER_Meteors_Length": "50", "B_CHOICE_BufferStyle": "Per Model Single Line"},
+                     layer=0)
+        print(f"Medley organ: outlines breathing on {len(bars_)} bars with smooth drifting "
+              f"movement on top, a rising-meteor build of {len(bts)} beats")
 
     # -- frenzy: the six hits and the drop --------------------------------------
     def _scene_frenzy(sc):
@@ -14425,12 +14452,24 @@ def main():
             return swell(x) * fd
         placed = []
 
-        def bars_static(target, cols, direction, reps="1", buf=None):
-            ex = {"E_CHOICE_Bars_Direction": direction, "E_TEXTCTRL_Bars_Cycles": "0",
+        # THE PATTERNS DRIFT, THEN FREEZE WITHOUT A JUMP. Each pattern moves
+        # until `still` and is then replaced by the same pattern at rest. A
+        # Bars pattern's position is (cycles x elapsed fraction), so giving
+        # the moving one a WHOLE number of cycles over [w0, still] lands it
+        # exactly where the resting copy starts -- the motion just stops.
+        # ~9 s per cycle: slow drifting, not rhythm. (v8 held them still the
+        # whole time; Krists: "they're just static looking".)
+        n_cyc = max(1, int(round((still - w0) / 9.0)))
+
+        def bars_static(target, cols, direction, reps="1", buf=None, key="sc_bar"):
+            ex = {"E_CHOICE_Bars_Direction": direction,
                   "E_SLIDER_Bars_BarCount": reps, "E_CHECKBOX_Bars_3D": "0"}
             if buf:
                 ex["B_CHOICE_BufferStyle"] = buf
-            placed.append(_put(target, "sc_bar", w0, f1, _sc_pal(*cols), ex))
+            placed.append(_put(target, key, w0, still, _sc_pal(*cols),
+                               {**ex, "E_TEXTCTRL_Bars_Cycles": f"{n_cyc}.0"}))
+            placed.append(_put(target, key, still, f1, _sc_pal(*cols),
+                               {**ex, "E_TEXTCTRL_Bars_Cycles": "0"}))
 
         # verticals: bands of the three colours up each strip, the order
         # rotating strip to strip so neighbours never match
@@ -14444,13 +14483,18 @@ def main():
             bars_static(a, (ROSE, GOLD), "Left", "3")
         # spheres: three-colour stripes
         for m in [x for x in _SC_PROPS if x.startswith(("Hanging Sphere", "Sphere-"))]:
-            placed.append(_put(m, "sphere_stripes", w0, f1, _sc_pal(SKY, GOLD, ROSE),
-                               {"E_TEXTCTRL_Bars_Cycles": "0"}))
-        # spinners: six still arms in gold and sky
+            bars_static(m, (SKY, GOLD, ROSE), "up", key="sphere_stripes")
+        # spinners turn slowly, then CROSSFADE (1.5 s) into the same arms at
+        # rest -- a pinwheel's angle cannot be landed exactly like the bands
         for m in _SC_SPIN:
-            placed.append(_put(m, "sc_pin", w0, f1, _sc_pal(GOLD, SKY, ROSE),
-                               {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Speed": "0",
-                                "E_SLIDER_Pinwheel_Thickness": "45"}))
+            pw = {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Thickness": "45"}
+            placed.append(_put(m, "sc_pin", w0, still + 1.5, _sc_pal(GOLD, SKY, ROSE),
+                               # speed 1: at 3 the arms changed 0.40 of the prop
+                               # per half second -- spinning, not drifting
+                               {**pw, "E_SLIDER_Pinwheel_Speed": "1", **_sc_fade(0.0, 1.5)}))
+            placed.append(_put(m, "sc_pin", still, f1, _sc_pal(GOLD, SKY, ROSE),
+                               {**pw, "E_SLIDER_Pinwheel_Speed": "0", **_sc_fade(1.5, 0.0)},
+                               layer=1))
         # floods: alternate sky and rose, still
         for j, m in enumerate(_SC_FLOODS):
             placed.append(_put(m, "sc_on", w0, f1, _sc_pal(SKY if j % 2 == 0 else ROSE)))
@@ -14465,12 +14509,16 @@ def main():
         n_sh = 0
         if "sc_nebula" in EFFECTS:
             fs_ = (still - w0) / max(1e-3, f1 - w0)
+            # ~5x faster than v8-v9 (speed 120 -> 400, drift 0.06 -> 0.10):
+            # measured, the clouds changed only 0.12 in ten seconds -- "it
+            # doesn't seem to be moving at all".
             curve = ("Active=TRUE|Id=ID_VALUECURVE_Shader_Speed|Type=Custom|Min=-1000.00|"
-                     f"Max=1000.00|RV=TRUE|Values=0.0000:0.560;{fs_:.4f}:0.560;"
+                     f"Max=1000.00|RV=TRUE|Values=0.0000:0.700;{fs_:.4f}:0.700;"
                      f"{fs_ + 0.0005:.4f}:0.500;1.0000:0.500|")
             for m in _SC_CANVAS:
                 placed.append(_put(m, "sc_nebula", w0, f1, _sc_pal(SKY, GOLD, ROSE),
-                                   {"E_VALUECURVE_Shader_Speed": curve}))
+                                   {"E_VALUECURVE_Shader_Speed": curve,
+                                    "E_SLIDER_SHADERXYZZY_drift": "10"}))
                 n_sh += 1
         # the swell and the fade, sampled every half second into every curve
         for e in placed:
