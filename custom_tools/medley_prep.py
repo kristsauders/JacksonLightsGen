@@ -93,6 +93,17 @@ def beats(mix: str) -> None:
         a0, a1 = p["audio_start"], p["audio_end"]
         b = (bt[(bt >= a0) & (bt < a1)] - a0).round(4)
         d = (db[(db >= a0) & (db < a1)] - a0).round(4)
+        # A returning song with IDENTICAL audio takes the PREVIOUS revision's
+        # grid: the tracker re-run on a re-edited mix jitters by milliseconds,
+        # and every beat-locked pass downstream then lands differently (rev3's
+        # Never Forget You differed from rev2 by 17/255 before its one fix).
+        bf = p.get("beats_from")
+        if bf:
+            mb2 = json.loads((SHOW / ".generation" / bf["mix"] / "mix_beats.json").read_text())
+            bt2, db2 = np.array(mb2["beats"]), np.array(mb2["downbeats"])
+            s0 = bf["audio_start"]; s1 = s0 + (a1 - a0)
+            b = (bt2[(bt2 >= s0) & (bt2 < s1)] - s0).round(4)
+            d = (db2[(db2 >= s0) & (db2 < s1)] - s0).round(4)
         dd = D.get(p["name"], {})
         if dd.get("half_time") and len(d) > 2:
             anchor = (dd.get("sections") or [(p["start"], "")])[0][0] - a0

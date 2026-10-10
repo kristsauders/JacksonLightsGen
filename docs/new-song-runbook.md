@@ -969,3 +969,42 @@ the new parts:
 - **Section loudness must stop at the keep window.** The slice's last section
   runs 10 s into the next song; Light Of Day's quiet intro ranked Shokoufeh's
   full-energy final chorus as quiet and the arc dimmed it to 69%.
+
+### Revising again (rev3, 2026-10-10): what a SECOND revision taught
+
+- **Map against the previous revision, not the original.** rev3 vs rev2 by
+  chroma tracking: identical to 16:04, a 40 s ramp where the owner fixed a
+  tempo glitch (rev2's grid read 109-113 BPM inside a 98 BPM song -- check
+  `mix_beats` BPM per 10 s across every returning song), then a constant
+  +3.594 s, then +309.7 s for the finale. Push the previous DESIGN through the
+  map (decimals >= 95 are times; integers in comments are years/BPM).
+- **Compose maps for twice-moved material, and keep identical parts EXACT.**
+  The finale map old -> rev3 must be a frame-aligned constant (old + 420.900)
+  wherever the audio is identical; interpolating noisy chroma offsets (+-0.03 s)
+  stretched long shader beds and shifted every clip, and the render came out
+  measurably different from v13 (5.5/255 vs 0.0). Only the stretched strings
+  get a ramp.
+- **A cut that moves inside a reused song restarts its shaders.** The merge
+  clips effects at the keep window; xLights starts a Shader's clock at the
+  clipped start, so the same bed shows a different phase (Light Of Day's intro,
+  cut 13 s later than in rev2, ran 1.45 s behind). Same look, different frames
+  -- expected, not a bug, but don't use frame diffs to judge those seconds.
+- **The generator's random choices are seeded by the song PATH.** Regenerating
+  a returning song under a new slice namespace (`.jl26r3/09 ENIGMA`) re-rolls
+  the cast, voice->prop assignments and rest rotation: ENIGMA's first drop lost
+  the Mega Tree (0.34 -> 0.05). Regenerate a returning song under its ORIGINAL
+  name (`.jl26r2/...`, backing up that dir's medley.json/analysis.json), so a
+  boundary fix changes only the boundary. Identical audio also takes the
+  previous revision's beat grid (`beats_from` in segments.json): the tracker
+  re-run on a re-edited mix jitters by ms and every beat-locked pass moves
+  (Never Forget You: 17/255 different before its one fix; with rev2's grid
+  79-95% of effects come out identical).
+- **Audit every boundary, then read the beats yourself.** `refine_boundaries`
+  without --write, then a beat table (level/bass/mids/hats/onset per beat) for
+  every flagged or low-scoring time, plus a gap scan (beats < 45% of the
+  surrounding level, 1-8 beats, followed by a return). Found this time: a drop
+  0.36 s late (Every Night), a verse 3 beats early (ENIGMA), a 6-beat silence
+  with the look change in its middle (Never Forget You), and a drop where the
+  tracker's bar phase was 2 beats off through the blend (Glad I Found You: the
+  bass lands on the tracker's beat 3). Most other suggestions were pickups or
+  riser starts and stay as read.
