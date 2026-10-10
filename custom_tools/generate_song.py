@@ -448,6 +448,10 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     # see the note in _bars().
     "bars_up_in":     ("Bars", _bars("up", buffer=PERMODEL)),
     "bars_down_in":   ("Bars", _bars("down", buffer=PERMODEL)),
+    # Side to side INSIDE one prop (Krists's own Pink Pony Club does exactly
+    # this on the mini trees: Bars Left/Right on each tree's own buffer).
+    "bars_left_in":   ("Bars", _bars("Left", buffer=PERMODEL)),
+    "bars_right_in":  ("Bars", _bars("Right", buffer=PERMODEL)),
     # --- rhythmic bars, from Krists's own sequences -------------------------
     # He uses Alternate Up/Down (37 each), which REVERSES the bar's direction
     # on every cycle -- so with the cycle rate locked to the beat, the bar
@@ -14564,8 +14568,13 @@ def main():
                 # one colour + two black slots: Bars paints each slot as a band,
                 # so a single colour alone fills the prop solid (measured: lit
                 # 1.00, motion 0.000) -- with black slots it is a bar travelling
-                _put(m, "sweep_up" if k % 2 == 0 else "sweep_down", t, nb,
-                     _sc_pal(c1 if j % 2 == 0 else c2, "#000000", "#000000"))
+                # per-model bars (As Pixel made each tree ONE pixel -- a blink);
+                # the trees go side to side on every other bar
+                if m.startswith("Mini Tree") and bar_i % 2 == 1:
+                    key = "bars_left_in" if k % 2 == 0 else "bars_right_in"
+                else:
+                    key = "bars_up_in" if k % 2 == 0 else "bars_down_in"
+                _put(m, key, t, nb, _sc_pal(c1 if j % 2 == 0 else c2, "#000000", "#000000"))
             # small props pop in pairs
             for j, m in enumerate(smalls):
                 if (j + k) % 2 == 0:
@@ -14658,14 +14667,22 @@ def main():
         # rest -- a pinwheel's angle cannot be landed exactly like the bands
         for m in _SC_SPIN:
             pw = {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Thickness": "45"}
-            # crossfade 0.4 s: at 1.5 s the arms visibly kept turning "for
-            # maybe another second or two" after the strings stopped (rev3).
-            placed.append(_put(m, "sc_pin", w0, still + 0.4, _sc_pal(GOLD, SKY, ROSE),
+            # STOP IN ITS TRACKS. xLights computes a pinwheel's angle from
+            # scratch every frame -- pos = elapsed_ms * speed / 50 degrees, plus
+            # Pinwheel_Offset (src-core/effects/PinwheelEffect.cpp) -- so the
+            # rest pose is NOT where the turning one got to: v8 crossfaded into
+            # offset 0 and the arms "rotate past 12 o'clock and then suddenly
+            # jump back to 12". The turning pinwheel now ends exactly at
+            # `still` and the resting one starts there at the angle it reached.
+            _spd = 1
+            _ang = int(round(((still - w0) * 1000.0 * _spd / 50.0) % 360))
+            placed.append(_put(m, "sc_pin", w0, still, _sc_pal(GOLD, SKY, ROSE),
                                # speed 1: at 3 the arms changed 0.40 of the prop
                                # per half second -- spinning, not drifting
-                               {**pw, "E_SLIDER_Pinwheel_Speed": "1", **_sc_fade(0.0, 0.4)}))
+                               {**pw, "E_SLIDER_Pinwheel_Speed": str(_spd)}))
             placed.append(_put(m, "sc_pin", still, f1, _sc_pal(GOLD, SKY, ROSE),
-                               {**pw, "E_SLIDER_Pinwheel_Speed": "0", **_sc_fade(0.4, 0.0)},
+                               {**pw, "E_SLIDER_Pinwheel_Speed": "0",
+                                "E_SLIDER_Pinwheel_Offset": str(_ang)},
                                layer=1))
         # floods: alternate sky and rose, still
         for j, m in enumerate(_SC_FLOODS):
@@ -15359,8 +15376,8 @@ def main():
         Each section dances one of three steps, chosen per section:
           * up/down -- a bar sweeps up each tree / cane, then down;
           * mirror  -- the same, but neighbours in opposite directions;
-          * sway    -- one line crossing the pair (trees) / the row (canes),
-                       left then right.
+          * the trees also go side to side (two bars up/down, two bars
+            left/right) -- all as a bar travelling inside each prop.
         The flashes on L_PULSE are untouched -- movement is added, not traded.
         """
         _trees = [m for m in ("Mini Tree 1", "Mini Tree 2") if m in positions]
@@ -15390,9 +15407,15 @@ def main():
                     continue
                 _keep.append(e)
             effects[:] = _keep
-            step = random.Random(f"{SONG_NAME}|dance|{si}").choice(
-                ["updown", "updown", "mirror", "sway"])
+            # Canes: up/down, all together or mirrored. Trees: up/down for
+            # two bars, then side to side for two. EVERY move is a Bars bar
+            # travelling INSIDE the prop's own buffer -- v8 used the stock
+            # `sweep_*` keys, whose buffer is As Pixel: a whole tree as ONE
+            # pixel, so the "sweep" only blinked the prop ("I only see
+            # flashing"). Per Model Default lets the bar climb the tree.
+            step = random.Random(f"{SONG_NAME}|dance|{si}").choice(["updown", "updown", "mirror"])
             pal = section_meta[si].get("palette") or PALETTES["ice"]
+            _cols = list(getattr(pal, "colors", None) or ["#FFFFFF"])
             hb = [t for t in _bt if a - 1e-3 <= t < b][::2]          # half notes
             for i, t in enumerate(hb):
                 nxt = hb[i + 1] if i + 1 < len(hb) else min(b, t + 2 * _beat_s)
@@ -15400,20 +15423,17 @@ def main():
                     continue
                 t0, t1 = int(t * 1000), int(nxt * 1000)
                 ph = beat_phase(t, every=2)
-                if step == "sway":
-                    for g in ("Mini Trees", "Candy Canes"):
-                        if _groups[g]:
-                            add(g, L_MOTION, ("chase_lr", "chase_rl")[ph], t0, t1, pal)
-                            _n += 1
-                    continue
-                # A travelling BAR needs black slots: Bars paints every palette
-                # slot as a band, so the section's 3-colour palette fills the
-                # prop solid and only the colours roll.
-                _cols = list(getattr(pal, "colors", None) or ["#FFFFFF"])
-                for j, m in enumerate(_trees + _canes):
+                for j, m in enumerate(_canes):
                     k = ph if step == "updown" else (ph + j) % 2
-                    add(m, L_MOTION, ("sweep_up", "sweep_down")[k], t0, t1,
+                    add(m, L_MOTION, ("bars_up_in", "bars_down_in")[k], t0, t1,
                         _sc_pal(_cols[(i + j) % len(_cols)], "#000000", "#000000"))
+                    _n += 1
+                sideways = (i // 4) % 2 == 1                          # 2 bars each
+                for j, m in enumerate(_trees):
+                    key = (("bars_left_in", "bars_right_in") if sideways
+                           else ("bars_up_in", "bars_down_in"))[ph]
+                    add(m, L_MOTION, key, t0, t1,
+                        _sc_pal(_cols[i % len(_cols)], "#000000", "#000000"))
                     _n += 1
             _n_sec += 1
         if _n:

@@ -1053,3 +1053,16 @@ the new parts:
   slots (`_sc_pal(c, "#000000", "#000000")`) for a bar that travels -- and
   `_g_section_colour` now leaves any palette with a black slot alone (it
   retinted the dancing trees' bars to the full section palette: solid again).
+- **A dancing prop needs a PER-MODEL buffer.** The stock `sweep_up/down`
+  keys default to `As Pixel` (made for crossing a GROUP prop to prop); on one
+  tree that is ONE pixel, so the bar only blinked it -- "I only see flashing".
+  `bars_up_in/down/left/right_in` (Per Model Default) travel inside each tree
+  and cane; verified as a band moving through height / across strands in the
+  rendered pixels. Krists's own Pink Pony Club does the same (Bars Left/Right
+  on each mini tree). Check the RENDER (node profile over time), not the xsq.
+- **A pinwheel has no memory.** xLights computes its angle each frame:
+  pos = elapsed_ms * speed / 50 degrees + Pinwheel_Offset
+  (src-core/effects/PinwheelEffect.cpp). Freezing = end the turning one at the
+  stop and start a speed-0 one with Offset = pos at that moment (mod 360);
+  a crossfade to offset 0 "jumps back to 12 o'clock". Measured: frame change
+  0.055 -> 0.000 at the stop.
