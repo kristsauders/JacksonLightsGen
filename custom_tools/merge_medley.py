@@ -21,6 +21,13 @@ Merging rules, each for a measured reason:
 * The ColorPalettes and EffectDB tables are positional lookups (`palette="N"`,
   `ref="N"`), so both are rebuilt globally with de-duplication and every
   reference is remapped.
+* A segment may carry a `splice`: {"from": t, "xsq": path, "time_map": [[src_s,
+  mix_s], ...]}. From `t` to the segment's end, effects come from that xsq
+  instead, their times mapped through the piecewise-linear time_map (np.interp,
+  extrapolated at the last slope). This lets a part whose audio is the same but
+  re-timed in the new mix (rev2's Light Of Day finale, ~7% slower strings) copy an
+  earlier merged render exactly: value curves are relative to each effect's span,
+  so stretching an effect stretches its motion with the music.
 * Three timing tracks are added so 29 minutes are navigable in xLights: Songs,
   Sections (each song's planned sections, in mix time) and Bars (from the
   whole-mix madmom grid, which follows tempo ramps).
@@ -29,6 +36,8 @@ from __future__ import annotations
 
 import argparse
 import json
+
+import numpy as np
 import xml.etree.ElementTree as ET
 from collections import OrderedDict
 from pathlib import Path
@@ -72,12 +81,36 @@ def main() -> None:
             eff_ix[s] = len(effdb); effdb.append(s)
         return eff_ix[s]
 
+    def shifter(off_s: float):
+        return lambda ms: ms + off_s * 1000.0
+
+    def warper(tm: list) -> "callable":
+        xs = np.array([a for a, _ in tm], float) * 1000.0
+        ys = np.array([b for _, b in tm], float) * 1000.0
+        s0 = (ys[1] - ys[0]) / (xs[1] - xs[0]); s1 = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+
+        def f(ms: float) -> float:
+            if ms < xs[0]:
+                return ys[0] + (ms - xs[0]) * s0
+            if ms > xs[-1]:
+                return ys[-1] + (ms - xs[-1]) * s1
+            return float(np.interp(ms, xs, ys))
+        return f
+
+    sources = []
     for p in plan:
-        tree = ET.parse(p["xsq"]); r = tree.getroot()
+        sp = p.get("splice")
+        if sp:
+            sources.append((p["name"], p["xsq"], p["start"], sp["from"], shifter(p["audio_start"])))
+            sources.append((p["name"] + " (splice)", sp["xsq"], sp["from"], p["end"], warper(sp["time_map"])))
+        else:
+            sources.append((p["name"], p["xsq"], p["start"], p["end"], shifter(p["audio_start"])))
+
+    for name, xsq, t0, t1, tmap in sources:
+        tree = ET.parse(xsq); r = tree.getroot()
         lp = [(c.text or "") for c in r.find("ColorPalettes")]
         le = [(c.text or "") for c in r.find("EffectDB")]
-        off = p["audio_start"] * 1000.0
-        w0, w1 = snap(p["start"] * 1000.0), snap(p["end"] * 1000.0)
+        w0, w1 = snap(t0 * 1000.0), snap(t1 * 1000.0)
         kept = clipped = dropped = 0
         for de in r.find("DisplayElements"):
             if de.get("type") == "model" and de.get("name") not in display:
@@ -90,8 +123,8 @@ def main() -> None:
                 while len(rec["layers"]) <= li:
                     rec["layers"].append([])
                 for ef in layer.findall("Effect"):
-                    s = snap(int(ef.get("startTime")) + off)
-                    e = snap(int(ef.get("endTime")) + off)
+                    s = snap(tmap(int(ef.get("startTime"))))
+                    e = snap(tmap(int(ef.get("endTime"))))
                     if e <= w0 or s >= w1:
                         dropped += 1
                         continue
@@ -109,7 +142,7 @@ def main() -> None:
                         at["palette"] = str(gpal(lp[int(at["palette"])]))
                     rec["layers"][li].append(at)
                     kept += 1
-        stats.append((p["name"], kept, clipped, dropped))
+        stats.append((name, kept, clipped, dropped))
 
     # ---- timing tracks ---------------------------------------------------
     def timing(name: str, marks: list[tuple[int, int, str]]) -> ET.Element:
@@ -147,7 +180,10 @@ def main() -> None:
     # ---- write -----------------------------------------------------------
     head = root.find("head")
     head.find("song").text = a.mix
-    head.find("mediaFile").text = str(SHOW / f"{a.mix}.mp3")
+    media = SHOW / f"{a.mix}.mp3"
+    if not media.exists():
+        media = SHOW / f"{a.mix}.wav"
+    head.find("mediaFile").text = str(media)
     head.find("sequenceDuration").text = f"{duration:.3f}"
 
     cp = root.find("ColorPalettes"); cp.clear()

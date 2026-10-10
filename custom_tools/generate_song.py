@@ -1379,6 +1379,21 @@ def _pass_label(lineno: int, lines: list[str]) -> str:
 
 
 SHADER_KEYS = register_shaders()
+# A medley song can bring custom shaders of its own (`extra_shaders`): built
+# and registered ONLY while that song generates, so no library song can ever
+# pick them at random.
+# extra_shaders: a file stem, or {"file", "key", "overrides"} for a variant of
+# one shader with other parameter values (Shokoufeh's denser chorus petals).
+for _ex in (MEDLEY.get("extra_shaders") or []):
+    _stem = _ex if isinstance(_ex, str) else _ex["file"]
+    _fs = SHOW_PATH / "Shaders" / f"{_stem}.fs"
+    if _fs.exists():
+        from isf_shader import shader_settings as _isf0
+        _k0 = "shader_" + re.sub(r"[^a-z0-9]+", "_",
+                                 (_stem if isinstance(_ex, str) else _ex["key"]).lower()).strip("_")
+        EFFECTS[_k0] = ("Shader", _isf0(_fs, speed=int(round(400 * min(1.5, max(0.6, SONG_TEMPO / 120.0)))),
+                                        overrides=None if isinstance(_ex, str) else _ex.get("overrides")))
+        SHADER_KEYS.append(_k0)
 ALL_SHADER_KEYS = list(SHADER_KEYS)   # before any medley pool narrows it
 # A medley song draws its RANDOM shader choices from its own small pool, so
 # fifteen songs in one half-hour show do not all reach for the same favourites.
@@ -5531,8 +5546,15 @@ def main():
         _rms = librosa.feature.rms(y=_y)[0]
         _rt = librosa.times_like(_rms, sr=_sr)
         per_sec = []
+        # A medley slice is padded 10 s into its neighbours: the last
+        # section's loudness must not include the NEXT song's quiet intro
+        # (Shokoufeh's full-energy final chorus ranked low and was dimmed to
+        # 69% because Light Of Day's intro sat in its window).
+        _kw = MEDLEY.get("keep") if MEDLEY else None
         for sec in analysis.sections:
             m = (_rt >= sec.start_time) & (_rt < sec.end_time)
+            if _kw and (m & (_rt >= _kw[0]) & (_rt < _kw[1])).any():
+                m &= (_rt >= _kw[0]) & (_rt < _kw[1])
             per_sec.append(float(np.mean(_rms[m])) if m.any() else 0.0)
         # Rank-normalise rather than divide by the peak.
         #
@@ -11719,6 +11741,14 @@ def main():
             _pal = (_sm.get("palette") if isinstance(_sm, dict) else None) \
                 or PALETTES["ice"]
             _key = random.Random(f"secmark|{SONG_NAME}|{_i}").choice(SHADER_KEYS)
+            # A hand-set section look names the shader: mark the boundary with
+            # THAT, never a random one. Shokoufeh's last chorus is pinned to the
+            # dense blossom_bloom; this pass gave its matrices the sparse
+            # blossom_drift (a 0.14 chorus after 0.40 / 0.30 ones).
+            _pin = next((v for k, v in (SONG_SECTION_LOOK.get(SONG_NAME) or {}).items()
+                         if abs(k - _t) <= 0.3 and v.get("shader")), None)
+            if _pin:
+                _key = _pin["shader"]
             # Ends at the NEXT boundary, never past it. A 12s marker blanketed
             # whatever came next, so marking three boundaries in Gooey left two
             # more unmarked than before -- the fix created the problem it was
@@ -14825,6 +14855,15 @@ def main():
                 continue
             _en, _sett = EFFECTS[_k]
             if e.settings.get("E_0FILEPICKERCTRL_IFS") == _sett.get("E_0FILEPICKERCTRL_IFS"):
+                # Same file -- but a variant (extra_shaders with overrides,
+                # e.g. blossom_bloom over Blossom Drift) differs only in its
+                # parameters. Bring those across and keep everything else
+                # (beat-locked speed curves) as it is.
+                _par = {k2: v2 for k2, v2 in _sett.items()
+                        if "SHADERXYZZY" in k2 and "VALUECURVE" not in k2}
+                if any(e.settings.get(k2) != v2 for k2, v2 in _par.items()):
+                    e.settings = {**e.settings, **_par}
+                    _n += 1
                 continue
             _keep = {k: v for k, v in e.settings.items()
                      if k.startswith(("X_", "T_", "B_"))}

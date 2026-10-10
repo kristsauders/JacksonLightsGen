@@ -52,11 +52,37 @@ def load_plan(mix: str) -> tuple[Path, list[dict]]:
     return G, json.loads((G / "segments.json").read_text())
 
 
+def load_design(mix: str) -> dict:
+    slug = re.sub(r"[^a-z0-9]+", "_", mix.lower()).strip("_")
+    f = ROOT / "medleys" / f"{slug}.py"
+    if not f.exists():
+        return {}
+    spec = importlib.util.spec_from_file_location("medley_design", f)
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod.DESIGN
+
+
+def half_time(b: np.ndarray, d: np.ndarray, anchor: float) -> tuple[np.ndarray, np.ndarray]:
+    """Every other beat and every other bar, phased so the bar line nearest
+    `anchor` (the song's first planned section) is kept. For cut-time songs the
+    tracker locks to (Sleigh Ride: 182 BPM where the felt pulse is 91) --
+    pulsing every 0.33 s reads as strobing."""
+    k = int(np.argmin(np.abs(d - anchor)))
+    d2 = d[k % 2::2]
+    # phase the beats on the first kept bar line, then take every other one
+    j0 = int(np.argmin(np.abs(b - d2[0])))
+    keep = np.zeros(len(b), bool); keep[j0 % 2::2] = True
+    return b[keep], d2
+
+
 def beats(mix: str) -> None:
     G, plan = load_plan(mix)
     mb = json.loads((G / "mix_beats.json").read_text())
     bt = np.array(mb["beats"]); db = np.array(mb["downbeats"])
+    D = load_design(mix)
     for p in plan:
+        if p.get("reused"):
+            continue            # an earlier mix's analysis: leave it as it was
         aj = SHOW / ".generation" / p["song"] / "analysis.json"
         if not aj.exists():
             print(f"  {p['name']:34s} not analysed yet"); continue
@@ -67,6 +93,10 @@ def beats(mix: str) -> None:
         a0, a1 = p["audio_start"], p["audio_end"]
         b = (bt[(bt >= a0) & (bt < a1)] - a0).round(4)
         d = (db[(db >= a0) & (db < a1)] - a0).round(4)
+        dd = D.get(p["name"], {})
+        if dd.get("half_time") and len(d) > 2:
+            anchor = (dd.get("sections") or [(p["start"], "")])[0][0] - a0
+            b, d = half_time(b, d, anchor)
         old = raw["beats"].get("tempo")
         raw["beats"]["beat_times"] = b.tolist()
         raw["beats"]["downbeat_times"] = d.tolist()
@@ -84,6 +114,8 @@ def design(mix: str) -> None:
     D = mod.DESIGN
     last = plan[-1]["name"]
     for p in plan:
+        if p.get("reused"):
+            continue            # an earlier mix's sequence, copied as it is
         d = dict(D.get(p["name"], {}))
         off = p["audio_start"]
         conv = lambda x: round(float(x) - off, 3)            # mix time -> song time
@@ -137,7 +169,8 @@ def design(mix: str) -> None:
                     return conv(v)
                 return v
             out["scenes"] = [{k: _sc(v, k) for k, v in sc.items()} for sc in d["scenes"]]
-        for k in ("palettes", "palette_family", "shader_pool", "groove", "pulse_mode"):
+        for k in ("palettes", "palette_family", "shader_pool", "groove", "pulse_mode",
+                  "extra_shaders"):
             if k in d:
                 out[k] = d[k]
         gd = SHOW / ".generation" / p["song"]

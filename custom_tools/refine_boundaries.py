@@ -117,8 +117,11 @@ def main() -> None:
         for name, old, new in changes:
             # Only inside this song's block, and only whole numbers: "361.57"
             # must not match inside "1361.57".
-            i0 = src.index(f'"{name}"')
-            i1 = src.find('\n    "', i0 + 1)
+            i0 = src.find(f'"{name}"')
+            if i0 < 0:
+                i0 = src.index(f"'{name}'")
+            i1 = min([x for x in (src.find('\n    "', i0 + 1), src.find("\n    '", i0 + 1),
+                                  src.find("\n    # ====", i0 + 1)) if x > 0] or [len(src)])
             i1 = len(src) if i1 < 0 else i1
             blk = re.sub(rf"(?<![\d.]){re.escape(old)}(?![\d])", new, src[i0:i1])
             src = src[:i0] + blk + src[i1:]

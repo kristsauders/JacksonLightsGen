@@ -915,3 +915,57 @@ Lessons, each measured on this mix:
   first guesses were wrong (organ entry, the reveal, a guitar build read as a
   drop); ask about the two or three moments the show is built around, then
   measure them exactly.
+
+### A REVISED mix (Jackson Lights 2026 rev2, 2026-10-09)
+
+When the owner re-cuts the mix, keep what is the same EXACTLY and only build
+the new parts:
+
+- **Align old vs new before anything else.** Cross-correlate chroma of the two
+  mixes in 10 s windows (`scratchpad/align_mixes.py` pattern): a constant
+  offset means identical audio; a drifting one means a re-stretch. rev2 was
+  identical to 392 s, then songs reappeared at -44.5 / -47.6 / -49.9 / +111.2 s,
+  with new songs between. Shazam every 10 s names what is new.
+- **Reuse = a segments.json entry with `"reused": true`** pointing at the old
+  per-song xsq and old `song` analysis, with the old `audio_start`. The merge
+  shifts by audio_start, so the same audio at the same mix time gives the
+  same frames. `medley_prep beats/design` skip reused entries.
+- **A re-timed part: splice the old MERGED render through a time map.** rev2
+  plays Light Of Day's string finale ~7% slower (offset +111.2 -> +115.5 s over
+  60 s; chroma similarity 0.95-1.0 along the map, onset correlation useless in
+  legato strings). `segments.json` entry `"splice": {"from", "xsq": "<old
+  (vN).xsq>", "time_map": [[old_s, new_s], ...]}` copies effects through
+  np.interp. Value curves are relative to each effect's span, so the sway
+  stretches with the strings; per-stroke timings stay on the strokes. Use the
+  merged vN, not the per-song xsq -- vN is what the owner approved.
+- **Port designs by mapping times**, not by re-designing: constant shift for
+  identical songs, interpolate along the alignment for drifting ones; then
+  `refine_boundaries.py --write` to re-snap.
+- **Transitions: cut where the NEW song is fully in.** The owner does not want
+  the incoming song's look during a blend -- the outgoing song's keep window
+  runs through the whole crossfade.
+- **Cut-time songs**: madmom locks Sleigh Ride (Ronettes) at 182 BPM; pulsing
+  every 0.33 s reads as strobing. Design key `half_time: True` makes
+  `medley_prep beats` keep every other beat and bar, phased onto the first
+  section's bar line (all four section starts landed exactly on kept bars).
+- `ffmpeg` in a `while read` loop eats stdin and mangles the next names
+  ("erture", "tar") -- always `ffmpeg -nostdin`.
+- The mix may come only as .wav; merge_medley points mediaFile at .mp3 if it
+  exists, else .wav.
+- **All 50+ registered shaders are owned** once a mix has 17 songs, so a song
+  whose pool measures dim gets a custom shader via `extra_shaders` (Deck the
+  Halls: Garland Twist, braided ribbons that fill the canvas -- ember_swarm
+  drops read 0.12-0.26, no brighter than the intro). An entry may also be
+  `{"file", "key", "overrides"}`: a variant of one shader with denser/brighter
+  parameters for the choruses (Shokoufeh's `blossom_bloom`), so a one-shader
+  song still has an arc.
+- **A pinned section look can be silently overridden twice** (measured on
+  Shokoufeh's last chorus, 0.14 against 0.40 / 0.30 for the others):
+  `_g_mark_section_changes` marked "unchanged" boundaries with a RANDOM shader
+  (now uses the section's pin), and the pinned-shader rewrite compared only
+  the .fs file name, so a same-file variant never got its parameters (now
+  copies the SHADERXYZZY sliders across). Check the matrices' Shader spans in
+  the xsq, not the log, when a section reads wrong.
+- **Section loudness must stop at the keep window.** The slice's last section
+  runs 10 s into the next song; Light Of Day's quiet intro ranked Shokoufeh's
+  full-energy final chorus as quiet and the arc dimmed it to 69%.
