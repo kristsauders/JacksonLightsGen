@@ -54,6 +54,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("mix")
     ap.add_argument("--out", required=True)
+    # The audio the sequence PLAYS, when it is not the file the mix was
+    # analysed from -- e.g. a mastered render with identical timing.
+    ap.add_argument("--media", default=None)
     a = ap.parse_args()
     G = SHOW / ".generation" / a.mix
     plan = json.loads((G / "segments.json").read_text())
@@ -183,6 +186,8 @@ def main() -> None:
     media = SHOW / f"{a.mix}.mp3"
     if not media.exists():
         media = SHOW / f"{a.mix}.wav"
+    if a.media:
+        media = Path(a.media) if Path(a.media).is_absolute() else SHOW / a.media
     head.find("mediaFile").text = str(media)
     head.find("sequenceDuration").text = f"{duration:.3f}"
 

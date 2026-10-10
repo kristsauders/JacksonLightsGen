@@ -1391,7 +1391,10 @@ for _ex in (MEDLEY.get("extra_shaders") or []):
         from isf_shader import shader_settings as _isf0
         _k0 = "shader_" + re.sub(r"[^a-z0-9]+", "_",
                                  (_stem if isinstance(_ex, str) else _ex["key"]).lower()).strip("_")
-        EFFECTS[_k0] = ("Shader", _isf0(_fs, speed=int(round(400 * min(1.5, max(0.6, SONG_TEMPO / 120.0)))),
+        # `speed` scales the clock (Aperture's Spacels stars "moving way too
+        # fast" at the song's tempo-scaled 400).
+        _spd = 1.0 if isinstance(_ex, str) else float(_ex.get("speed", 1.0))
+        EFFECTS[_k0] = ("Shader", _isf0(_fs, speed=int(round(_spd * 400 * min(1.5, max(0.6, SONG_TEMPO / 120.0)))),
                                         overrides=None if isinstance(_ex, str) else _ex.get("overrides")))
         SHADER_KEYS.append(_k0)
 ALL_SHADER_KEYS = list(SHADER_KEYS)   # before any medley pool narrows it
@@ -6613,6 +6616,20 @@ def main():
                     continue
 
                 hits = voice.in_window(section.start_time, section.end_time)
+                # ON THE BEAT, for a song whose drums are too fast to read.
+                # "that song has a lot of very fast kicks and it's a hard rhythm
+                # to visualize because it's so fast... adjust that to be on the
+                # beat" (Never Forget You, guaracha at 144 BPM). With the design
+                # key `voice_on_beat`, every voice except the snare keeps only
+                # hits that fall on a beat, at most one per beat.
+                if MEDLEY and MEDLEY.get("voice_on_beat") and vname != "snare" and beats:
+                    _bta = np.asarray(beats, dtype=float)
+                    _on, _last = [], -1e9
+                    for _h in hits:
+                        _j = int(np.argmin(np.abs(_bta - _h)))
+                        if abs(_bta[_j] - _h) <= 0.07 and _bta[_j] - _last >= beat_ms / 1000.0 * 0.95:
+                            _on.append(float(_bta[_j])); _last = float(_bta[_j])
+                    hits = _on
                 if target.get("slow"):
                     # Wash lights (floods) thin to at most one hit every two
                     # beats regardless of what their instrument is doing --
@@ -7693,6 +7710,13 @@ def main():
                     anti = (_a, halves)
                     break
             for bi, bt in enumerate(flashes):
+                # No beat accent inside an ambient passage. In 'groove' mode
+                # these followed the kick, which a drumless stretch hardly has;
+                # in 'quarter' mode they fire on every beat regardless -- 561
+                # sphere flashes in Never Forget You's drumless 54 s, which the
+                # ambient clearing (it runs earlier) never saw.
+                if in_ambient(bt):
+                    continue
                 t_ms = int(bt * 1000)
                 on_downbeat = any(abs(bt - d) <= 0.09 for d in downbeats)
                 # Every held anchor hits, so several places in the house are
@@ -13406,6 +13430,12 @@ def main():
                 continue
             if e.layer == L_SIG:
                 continue                      # drop staging / melody
+            # A palette with a BLACK slot is a shape, not a colour choice: a
+            # Bars bar or a thin line travels only because of the black bands.
+            # Retinting the dancing trees' bars to the full section palette
+            # filled them solid (lit 1.00, motion 0.024).
+            if e.palette is not None and "#000000" in [c.upper() for c in e.palette.colors]:
+                continue
             _t = e.start_time_ms / 1000.0
             _c = [x for x in _times if x <= _t + 0.25]
             if not _c:
@@ -14060,8 +14090,13 @@ def main():
                               or "tunnel matrix" in m.lower())), key=_sc_x)
     _SC_PROPS = sorted((m for m in positions if _sc_live(m)), key=_sc_x)
     _SC_ARCHES = sorted((m for m in _SC_PROPS if re.fullmatch(r"Arch \d", m)), key=_sc_x)
+    # The two big EFL flakes spin with the others: "when the props show a
+    # spinning animation the two EFL flakes are not used even though they're
+    # big enough" (Ode intro, organ, works) -- and in the string finale they
+    # sat flat white among the "statics" while everything else turned.
     _SC_SPIN = [m for m in ("GE Rosa Grande 1", "SOL GE Baby Grand Illusion",
-                            "Showstopper Spinner", "Showstopper Snowflake")
+                            "Showstopper Spinner", "Showstopper Snowflake",
+                            "Snowflake EFL 36-1", "Snowflake EFL 36-2")
                 if m in positions and _sc_live(m)]
     _SC_FLOODS = [m for m in _SC_PROPS if m.startswith("Flood-")]
     _SC_VERTS = sorted((m for m in _SC_PROPS if m.startswith("Vertical Strip")), key=_sc_x)
@@ -14467,11 +14502,28 @@ def main():
                                   + ";".join(f"{a:.3f}:{b:.2f}" for a, b in pts) + "|"}
                     n_sh += 1
         GOLD, SKY, PEACH, WHITE, BLUE = "#FFC857", "#87CEEB", "#FF9F80", "#FFFFFF", "#2050FF"
+        # Other songs' drops borrow the works in their OWN colours -- "the songs
+        # starting with deck the halls and after are all very dancey and it's
+        # the peak of the show, so we need to really put our best tricks and big
+        # rhythmic movements focused there". `colors`: bar A pair, bar B pair.
+        if sc.get("colors"):
+            GOLD, BLUE, WHITE, PEACH = (list(sc["colors"]) * 2)[:4]
+        # `level` < 1 dims every colour: the other songs' works sit a little
+        # under Light Of Day's, which is "the biggest peak of the whole show".
+        if sc.get("level", 1.0) < 1.0:
+            _lv = float(sc["level"])
+            GOLD, BLUE, WHITE, PEACH = ("#%02X%02X%02X" % tuple(int(int(c[i:i + 2], 16) * _lv)
+                                        for i in (1, 3, 5)) for c in (GOLD, BLUE, WHITE, PEACH))
         bts = _sc_beats(w0, w1)
         bars = set(round(x, 3) for x in _sc_bars(w0, w1))
         half = max(1, len(_SC_VERTS) // 2)
-        smalls = [m for m in _SC_PROPS if m.startswith(("GE Insane Cane", "Mini Tree", "Orb-",
-                                                         "Flake I", "Snowflake EFL"))]
+        # The mini trees and canes DANCE here like the verticals -- a bar up
+        # on one beat, down on the next ("in addition to flashing we could
+        # also use up/down motion on those just like on verticals"); the
+        # EFL flakes spin with the other spinners; orbs and small flakes pop.
+        smalls = [m for m in _SC_PROPS if m.startswith(("Orb-", "Flake I"))]
+        dancers = [m for m in _SC_PROPS if m in ("Mini Tree 1", "Mini Tree 2")
+                   or re.fullmatch(r"GE Insane Cane \d", m)]
         bar_i = -1
         n = 0
         for k, t in enumerate(bts):
@@ -14507,6 +14559,13 @@ def main():
                 if m.startswith(("Hanging Sphere", "Sphere-")):
                     _put(m, "fill_up" if k % 2 == 0 else "fill_down", t, nb,
                          _sc_pal(c2 if k % 2 == 0 else c1))
+            # trees and canes: a bar sweeps up on one beat and down on the next
+            for j, m in enumerate(dancers):
+                # one colour + two black slots: Bars paints each slot as a band,
+                # so a single colour alone fills the prop solid (measured: lit
+                # 1.00, motion 0.000) -- with black slots it is a bar travelling
+                _put(m, "sweep_up" if k % 2 == 0 else "sweep_down", t, nb,
+                     _sc_pal(c1 if j % 2 == 0 else c2, "#000000", "#000000"))
             # small props pop in pairs
             for j, m in enumerate(smalls):
                 if (j + k) % 2 == 0:
@@ -14599,12 +14658,14 @@ def main():
         # rest -- a pinwheel's angle cannot be landed exactly like the bands
         for m in _SC_SPIN:
             pw = {"E_SLIDER_Pinwheel_Arms": "6", "E_SLIDER_Pinwheel_Thickness": "45"}
-            placed.append(_put(m, "sc_pin", w0, still + 1.5, _sc_pal(GOLD, SKY, ROSE),
+            # crossfade 0.4 s: at 1.5 s the arms visibly kept turning "for
+            # maybe another second or two" after the strings stopped (rev3).
+            placed.append(_put(m, "sc_pin", w0, still + 0.4, _sc_pal(GOLD, SKY, ROSE),
                                # speed 1: at 3 the arms changed 0.40 of the prop
                                # per half second -- spinning, not drifting
-                               {**pw, "E_SLIDER_Pinwheel_Speed": "1", **_sc_fade(0.0, 1.5)}))
+                               {**pw, "E_SLIDER_Pinwheel_Speed": "1", **_sc_fade(0.0, 0.4)}))
             placed.append(_put(m, "sc_pin", still, f1, _sc_pal(GOLD, SKY, ROSE),
-                               {**pw, "E_SLIDER_Pinwheel_Speed": "0", **_sc_fade(1.5, 0.0)},
+                               {**pw, "E_SLIDER_Pinwheel_Speed": "0", **_sc_fade(0.4, 0.0)},
                                layer=1))
         # floods: alternate sky and rose, still
         for j, m in enumerate(_SC_FLOODS):
@@ -15277,6 +15338,89 @@ def main():
               f"one point per {_MIN_PT_S * 1000:.0f}ms of real time")
         return effects
 
+    def _g_dance_props(effects):
+        """The mini trees and canes DANCE on the beat grid the verticals use.
+
+        "For the two mini trees and for the four candy canes, for rhythm we
+        just use flashing which works well, but in addition to flashing we
+        could also use up/down motion on those just like on verticals... for
+        the two mini trees they often do a nice side to side motion with a line
+        going left/right but it usually doesn't seem timed with the beat... If
+        we time that the same as verticals it could look great, like they're
+        dancing back and forth."
+
+        Their motion came from the voice path, where each chase spans from one
+        hit of the prop's instrument to the next -- syncopated gaps (measured
+        on What Love Can Do: 49 Mini Trees chases of ~1.9 s, off the grid).
+        Here, in every section with a real beat (not ambient, the drum voice
+        playing), that voice motion is replaced by the ensemble's grid: one
+        move per HALF NOTE, starting on a beat, direction flipping every half
+        bar (beat_phase every=2) -- the same instants the verticals reverse on.
+        Each section dances one of three steps, chosen per section:
+          * up/down -- a bar sweeps up each tree / cane, then down;
+          * mirror  -- the same, but neighbours in opposite directions;
+          * sway    -- one line crossing the pair (trees) / the row (canes),
+                       left then right.
+        The flashes on L_PULSE are untouched -- movement is added, not traded.
+        """
+        _trees = [m for m in ("Mini Tree 1", "Mini Tree 2") if m in positions]
+        _canes = sorted((m for m in positions if re.fullmatch(r"GE Insane Cane \d", m)
+                         and m not in inactive_models()), key=lambda m: positions[m]["x"])
+        _groups = {"Mini Trees": _trees, "Candy Canes": _canes}
+        _all = set(_trees) | set(_canes) | set(_groups)
+        if not beats or not (_trees or _canes):
+            return effects
+        _drv = next((voices[v] for v in ("kick", "snare") if v in voices), None)
+        _beat_s = beat_ms / 1000.0
+        _bt = np.asarray(beats, dtype=float)
+        _blk = [(a / 1000.0, b / 1000.0) for a, b in blackout_windows]
+        _n_sec = _n = _cut = 0
+        for si, sec in enumerate(analysis.sections):
+            a, b = sec.start_time, sec.end_time
+            if b - a < 4 * _beat_s or in_ambient(a) or in_ambient((a + b) / 2):
+                continue
+            if _drv is None or len(_drv.in_window(a, b)) < 4 or sec.energy_level < 0.45:
+                continue
+            # the voice motion these props had in this section goes
+            _keep = []
+            for e in effects:
+                if (e.layer == L_MOTION and e.model_name.split("/")[0] in _all
+                        and e.start_time_ms >= a * 1000 - 1 and e.start_time_ms < b * 1000):
+                    _cut += 1
+                    continue
+                _keep.append(e)
+            effects[:] = _keep
+            step = random.Random(f"{SONG_NAME}|dance|{si}").choice(
+                ["updown", "updown", "mirror", "sway"])
+            pal = section_meta[si].get("palette") or PALETTES["ice"]
+            hb = [t for t in _bt if a - 1e-3 <= t < b][::2]          # half notes
+            for i, t in enumerate(hb):
+                nxt = hb[i + 1] if i + 1 < len(hb) else min(b, t + 2 * _beat_s)
+                if nxt - t < VOICE_MOTION_MIN_GAP_S or any(x0 <= t < x1 for x0, x1 in _blk):
+                    continue
+                t0, t1 = int(t * 1000), int(nxt * 1000)
+                ph = beat_phase(t, every=2)
+                if step == "sway":
+                    for g in ("Mini Trees", "Candy Canes"):
+                        if _groups[g]:
+                            add(g, L_MOTION, ("chase_lr", "chase_rl")[ph], t0, t1, pal)
+                            _n += 1
+                    continue
+                # A travelling BAR needs black slots: Bars paints every palette
+                # slot as a band, so the section's 3-colour palette fills the
+                # prop solid and only the colours roll.
+                _cols = list(getattr(pal, "colors", None) or ["#FFFFFF"])
+                for j, m in enumerate(_trees + _canes):
+                    k = ph if step == "updown" else (ph + j) % 2
+                    add(m, L_MOTION, ("sweep_up", "sweep_down")[k], t0, t1,
+                        _sc_pal(_cols[(i + j) % len(_cols)], "#000000", "#000000"))
+                    _n += 1
+            _n_sec += 1
+        if _n:
+            print(f"Dancing props: {_n} half-note moves on the mini trees and canes "
+                  f"across {_n_sec} beat sections ({_cut} off-grid voice chases replaced)")
+        return effects
+
     # THE LATE GUARDS, IN ORDER. Everything above places effects; everything
     # here corrects what came out. The order is not incidental and three bugs
     # in one day came from getting it wrong, so it is written down as data
@@ -15310,6 +15454,7 @@ def main():
         ("a melody phrase plays alone on its props", _g_melody_solo),
         ("drop sliver effects", _g_slivers),
         ("shader change on a drop is a replacement", _g_replace_on_drop),
+        ("the mini trees and canes dance on the beat grid", _g_dance_props),
         ("resolve same-layer overlaps", _g_layer_overlaps),
         ("pulse-rate ceiling on the curves", _g_pulse_ceiling),
         ("matrix shaders move with the bar", _g_matrix_beat_shaders),

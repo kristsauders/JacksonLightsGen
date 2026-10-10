@@ -1008,3 +1008,48 @@ the new parts:
   tracker's bar phase was 2 beats off through the blend (Glad I Found You: the
   bass lands on the tracker's beat 3). Most other suggestions were pickups or
   riser starts and stay as read.
+
+### Review round on rev3 (2026-10-10): what each note turned out to be
+
+- **"No rhythm where there's no clear beat"** -> measure it: drum-stem RMS per
+  bar against the song's own 80th percentile; >= 3 bars under 25% is beatless.
+  Medley songs never auto-detect ambient (hand-set lists switch detection off),
+  so every such stretch must be in the design's `ambient`. It removed 2-3k
+  rhythmic hits per intro (prop flashes/min fell 3-11x) -- Santa, Never Forget
+  You's drumless 32 bars, Deck/Movin'/Glad intros, Light Of Day's intro.
+- **The peak songs get the works**: `scenes: [{kind: works, window, colors,
+  level}]` -- the Light Of Day chorus choreography in each song's colours at
+  0.9, so Light Of Day (display 0.50) stays the brightest moment while the
+  drops' rhythm rose 1.4-2.9x.
+- **Mini trees and canes dance** (`_g_dance_props`): their motion came from the
+  voice path, each chase spanning to the instrument's NEXT hit -- syncopated,
+  "not timed with the main beat". Now one move per half note on the beat grid,
+  direction flipping on the verticals' beats; per section up/down, mirror or a
+  side-to-side sway. In the works they level-meter per beat with the verticals.
+- **A shader that steps on its own clock reads as a glitch** (Argyle March,
+  Tartan Shift quantised TIME); make it smooth and let the speed curve's beat
+  reversal give the rhythm. Also: a palette index that WRAPS (fract) jumps from
+  c3 to c1 -- cycle it with a sine.
+- **Check a shader's maths at matrix resolution in numpy before blaming zoom.**
+  Caustic Pool's accumulator sat near -5, so abs()^sharp saturated 96% of
+  pixels: "the matrices are all just blue". The canonical formulation (inten
+  0.005, averaged) lights ~half the canvas.
+- **Stillness**: find the stop in the audio (-17 -> -27 dB in 0.3 s), not
+  through composed maps; and a 1.5 s spinner crossfade is "a second or two
+  late" -- 0.4 s.
+- **Approved songs take GRAFTS, not regenerations**: `graft_elements.py` copies
+  only the named model rows (EFL flakes, trees, canes) from a fresh generation
+  into the approved .xsq; regenerating Be With You moved a blackout before its
+  final guitar hit.
+- `voice_on_beat` (design key) keeps a voice's hits only on beats, one per
+  beat (snare exempt); pair it with `pulse_mode: quarter` -- 'groove' accents
+  follow the kick pattern and were 31% of Never Forget You's off-beat flashes.
+- `extra_shaders` variants accept `speed` (clock multiplier); merge_medley
+  `--media` plays a mastered file with the same timing.
+- **Bars with a one-colour palette is a solid fill, not a moving bar.** Bars
+  paints every palette slot as a band; with one colour (or a full 3-colour
+  section palette) every band is lit and nothing appears to travel -- measured
+  on the works dancers: lit 1.00, motion 0.000. Pass the colour plus black
+  slots (`_sc_pal(c, "#000000", "#000000")`) for a bar that travels -- and
+  `_g_section_colour` now leaves any palette with a black slot alone (it
+  retinted the dancing trees' bars to the full section palette: solid again).

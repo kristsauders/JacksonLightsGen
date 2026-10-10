@@ -181,7 +181,7 @@ def design(mix: str) -> None:
                 return v
             out["scenes"] = [{k: _sc(v, k) for k, v in sc.items()} for sc in d["scenes"]]
         for k in ("palettes", "palette_family", "shader_pool", "groove", "pulse_mode",
-                  "extra_shaders"):
+                  "extra_shaders", "voice_on_beat"):
             if k in d:
                 out[k] = d[k]
         gd = SHOW / ".generation" / p["song"]
