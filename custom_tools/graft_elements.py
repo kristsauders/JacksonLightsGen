@@ -81,7 +81,7 @@ def main() -> None:
         n_out = n_in = 0
         for de in d.find("ElementEffects"):
             nm = de.get("name")
-            if only is not None and nm.split("/")[0] not in only:
+            if only is not None and nm not in only and nm.split("/")[0] not in only:
                 continue
             be = bel.get(nm)
             if be is None:

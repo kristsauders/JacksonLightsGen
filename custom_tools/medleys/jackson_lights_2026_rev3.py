@@ -534,14 +534,19 @@ DESIGN: dict[str, dict] = {
     # sections... this is the big climax of the show and we want it to be impactful
     # and memorable"): three 8-bar sections, each its own look, escalating --
     #   33:17.5 chorus 1  Ripple Grid (the v13 look)
-    #   33:36.4 chorus 2  Light Shards (new: prismatic shafts sweeping the house)
-    #   33:54.1 the heavy section (bass up, mids/hats out)  Solar Wind (new: a storm
+    #   33:35.3 chorus 2  Light Shards (new: prismatic shafts sweeping the house)
+    #   33:53.0 the heavy section (hats/mids drop out; bass slams a bar later)  Solar Wind (new: a storm
+    # Phrases are 8 bars from the DROP (1997.46): the tracker's bar phase is two beats
+    # off here, so its downbeats (2016.37, 2034.15) were a beat-pair late -- "the
+    # shader changes too late"; the strings start 24 bars on, 2050.83, where the
+    # final chord drops away (the sunrise look had started at 2049.15).
     #           of light rushing across, flipping direction on the beat), in 'blaze'
     # The build keeps the intro's Rain on Glass so the drop REVEALS Ripple Grid.
     '21 Light Of Day': {'palettes': {'daybreak': ['#FFC857', '#FF9F80', '#87CEEB'],
                    'firstlight': ['#87CEEB', '#FFF1C1', '#FFB38A'],
                    'blaze': ['#FFD000', '#FF3D00', '#2050FF']},
-      'extra_shaders': ['Light Shards', 'Solar Wind'],
+      # Solar Wind "moving too fast" (rev3 round 4) -> 0.25x clock, calmer lanes
+      'extra_shaders': ['Light Shards', {'file': 'Solar Wind', 'key': 'solar_wind', 'speed': 0.25}],
       'palette_family': ['daybreak', 'firstlight'],
       'shader_pool': ['aurora_curtain', 'falling_embers', 'rain_on_glass', 'ripple_grid'],
       'sections': [(1941.16, 'intro'),
@@ -549,24 +554,24 @@ DESIGN: dict[str, dict] = {
                    (1985.23, 'build'),
                    (1991.89, 'break'),
                    (1997.46, 'chorus'),
-                   (2016.37, 'chorus'),
-                   (2034.12, 'chorus'),
-                   (2049.69, 'outro')],
+                   (2015.26, 'chorus'),
+                   (2033.04, 'chorus'),
+                   (2050.83, 'outro')],
       'section_look': {1941.16: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
                        1952.07: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
                        1985.23: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
                        1991.89: {'palette': 'daybreak', 'shader': 'shader_rain_on_glass'},
                        1997.46: {'palette': 'daybreak', 'shader': 'shader_ripple_grid'},
-                       2016.37: {'palette': 'daybreak', 'shader': 'shader_light_shards'},
-                       2034.12: {'palette': 'blaze', 'shader': 'shader_solar_wind'},
-                       2049.69: {'palette': 'daybreak', 'shader': 'shader_aurora_curtain'}},
-      'ambient': [(1941.16, 1997.46), (2049.69, 2145.22)],
+                       2015.26: {'palette': 'daybreak', 'shader': 'shader_light_shards'},
+                       2033.04: {'palette': 'blaze', 'shader': 'shader_solar_wind'},
+                       2050.83: {'palette': 'daybreak', 'shader': 'shader_aurora_curtain'}},
+      'ambient': [(1941.16, 1997.46), (2050.83, 2145.22)],
       'drops': [1997.46],
       'climax': [1997.46],
-      'outro': {'no_flash_from': 2049.69, 'fade': [2087.31, 2109.06]},
-      'scenes': [{'kind': 'works', 'window': [1997.46, 2049.69]},
+      'outro': {'no_flash_from': 2050.83, 'fade': [2087.31, 2109.06]},
+      'scenes': [{'kind': 'works', 'window': [1997.46, 2050.83]},
                  {'kind': 'horizon',
-                  'window': [2049.69, 2145.22],
+                  'window': [2050.83, 2145.22],
                   'peak': 2084.85,
                   'fade': [2087.31, 2109.06],
                   'still_from': 2086.7,

@@ -3,7 +3,7 @@
   "CATEGORIES": ["2d", "generator", "rhythmic"],
   "DESCRIPTION": "A storm of light rushing across the canvas: dense streaks of the palette colours at many speeds, bright heads and long fading tails, on lanes that ripple slightly. The whole stream reads as one force moving across the house. `rate` is signed: the beat-reversal flips the whole stream's direction on the beat.",
   "INPUTS": [
-    { "NAME": "rate",    "TYPE": "float", "DEFAULT": 0.7,  "MIN": -2.0, "MAX": 2.0 },
+    { "NAME": "rate",    "TYPE": "float", "DEFAULT": 0.5,  "MIN": -2.0, "MAX": 2.0 },
     { "NAME": "lanes",   "TYPE": "float", "DEFAULT": 4.0, "MIN": 4.0,  "MAX": 40.0 },
     { "NAME": "density", "TYPE": "float", "DEFAULT": 1.0,  "MIN": 0.1,  "MAX": 1.0 },
     { "NAME": "tail",    "TYPE": "float", "DEFAULT": 0.9, "MIN": 0.05, "MAX": 0.8 },
@@ -20,7 +20,7 @@ void main() {
     float y = uv.y * lanes + 0.35 * sin(uv.x * 6.0 + TIME * 0.7);
     float lane = floor(y);
     float ly = fract(y) - 0.5;
-    float sp = 0.6 + 1.4 * hw(lane + 3.1);                // each lane its own speed
+    float sp = 0.5 + 0.7 * hw(lane + 3.1);                // each lane its own speed (calmer: was 0.6-2.0)
     float x = uv.x * 2.0 - TIME * rate * sp;
     float seg = x * (1.5 + hw(lane + 7.7));
     float id = floor(seg);

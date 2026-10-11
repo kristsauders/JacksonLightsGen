@@ -14657,17 +14657,25 @@ def main():
                     _put(m, "fill_up" if k % 2 == 0 else "fill_down", t, nb,
                          _sc_pal(c2 if k % 2 == 0 else c1))
             # trees and canes: a bar sweeps up on one beat and down on the next
+            # three ideas rotating by bar, all as a thin line (~10%): all sweep;
+            # left/right pairs alternate per beat; left/right pairs FLASH
+            _dc = [m for m in dancers if not m.startswith("Mini Tree")]
+            _dt = [m for m in dancers if m.startswith("Mini Tree")]
+            _side = k % 2
+            _pair = (_dc[:len(_dc) // 2] if _side == 0 else _dc[len(_dc) // 2:]) + _dt[_side:_side + 1]
+            idea = bar_i % 3
             for j, m in enumerate(dancers):
-                # one colour + two black slots: Bars paints each slot as a band,
-                # so a single colour alone fills the prop solid (measured: lit
-                # 1.00, motion 0.000) -- with black slots it is a bar travelling
-                # per-model bars (As Pixel made each tree ONE pixel -- a blink);
-                # the trees go side to side on every other bar
-                if m.startswith("Mini Tree") and bar_i % 2 == 1:
-                    key = "chunk_left" if k % 2 == 0 else "chunk_right"
-                else:
-                    key = "chunk_up" if k % 2 == 0 else "chunk_down"
-                _put(m, key, t, nb, _sc_pal(c1 if j % 2 == 0 else c2), chunk_extra(m, key))
+                if idea == 0:
+                    key = (("chunk_left", "chunk_right") if m.startswith("Mini Tree") and bar_i % 2
+                           else ("chunk_up", "chunk_down"))[k % 2]
+                    _put(m, key, t, nb, _sc_pal(c1 if j % 2 == 0 else c2), chunk_extra(m, key, 0.10))
+                elif m in _pair:
+                    if idea == 1:
+                        key = "chunk_up" if (k // 2) % 2 == 0 else "chunk_down"
+                        _put(m, key, t, nb, _sc_pal(c1 if _side == 0 else c2), chunk_extra(m, key, 0.10))
+                    else:
+                        _put(m, "sc_on", t, t + L * 0.5, _sc_pal(c1 if _side == 0 else c2),
+                             _sc_fade(0.0, L * 0.35))
             # small props pop in pairs
             for j, m in enumerate(smalls):
                 if (j + k) % 2 == 0:
@@ -15530,7 +15538,20 @@ def main():
         _beat_s = beat_ms / 1000.0
         _bt = np.asarray(beats, dtype=float)
         _blk = [(a / 1000.0, b / 1000.0) for a, b in blackout_windows]
+        # Every group made only of the dancers or their SUBMODELS: rows below
+        # the props paint over the black underlay -- measured, the cane
+        # submodel groups ("GE Insane Cane Circles GRP", "...Half Shell Up/Down
+        # GRP") kept both cane pairs 27-58% lit through every beat, so a
+        # left/right step never read. Their submodel rows go too.
+        try:
+            _lg = json.loads((SHOW_PATH / ".generation" / "layout.json").read_text())["xlights_model_groups"]
+        except Exception:
+            _lg = {}
+        _dead = inactive_models()
+        _dance_groups = set(_groups) | {g for g, mem in _lg.items() if mem and all(
+            m.split("/")[0] in _all or m.split("/")[0] in _dead for m in mem)}
         _n_sec = _n = _cut = 0
+        _last_step = None
         for si, sec in enumerate(analysis.sections):
             a, b = sec.start_time, sec.end_time
             if b - a < 4 * _beat_s or in_ambient(a) or in_ambient((a + b) / 2):
@@ -15543,8 +15564,13 @@ def main():
             _keep = []
             for e in effects:
                 _in = e.start_time_ms >= a * 1000 - 1 and e.start_time_ms < b * 1000
-                if _in and ((e.layer == L_MOTION and e.model_name.split("/")[0] in _all)
-                            or e.model_name in _groups):
+                # ...and their other FLASHES: the step decides who flashes
+                # (flash_lr). Measured: generic every-beat accents lit both cane
+                # pairs on every beat, so lr_pairs/chase never read.
+                if _in and (((e.layer == L_MOTION or e.layer == L_PULSE)
+                             and e.model_name.split("/")[0] in _all)
+                            or e.model_name in _dance_groups
+                            or ("/" in e.model_name and e.model_name.split("/")[0] in _all)):
                     _cut += 1
                     continue
                 _keep.append(e)
@@ -15561,31 +15587,65 @@ def main():
             # `sweep_*` keys, whose buffer is As Pixel: a whole tree as ONE
             # pixel, so the "sweep" only blinked the prop ("I only see
             # flashing"). Per Model Default lets the bar climb the tree.
-            step = random.Random(f"{SONG_NAME}|dance|{si}").choice(["updown", "updown", "mirror"])
+            # A DIFFERENT STEP EACH SECTION (rev3 review: "we use the same
+            # effect too much... we can still do some flashing as well... a
+            # left/right split... left candy canes, right candy canes, left...
+            # mini tree 1, then 2... on the beat"):
+            #   together  all sweep a line up/down on the half note
+            #   mirror    neighbours sweep in opposite directions
+            #   lr_pairs  per BEAT: left canes + tree 1, then right canes + tree 2
+            #   flash_lr  the same alternation as quick flashes
+            #   chase     one cane at a time across the row and back, per beat
+            # never the same step twice in a row. The line is ~10% of the prop
+            # ("a bit too big... blocky... more of a line").
+            _steps = ["together", "mirror", "lr_pairs", "flash_lr", "chase"]
+            _rs = random.Random(f"{SONG_NAME}|dance|{si}")
+            step = _rs.choice([x for x in _steps if x != _last_step] or _steps)
+            _last_step = step
             pal = section_meta[si].get("palette") or PALETTES["ice"]
             _cols = list(getattr(pal, "colors", None) or ["#FFFFFF"])
-            hb = [t for t in _bt if a - 1e-3 <= t < b][::2]          # half notes
-            for i, t in enumerate(hb):
-                nxt = hb[i + 1] if i + 1 < len(hb) else min(b, t + 2 * _beat_s)
+            _half = len(_canes) // 2
+            _left, _right = _canes[:_half], _canes[_half:]
+            _beats_sec = [t for t in _bt if a - 1e-3 <= t < b]
+            per_beat = step in ("lr_pairs", "flash_lr", "chase")
+            grid = _beats_sec if per_beat else _beats_sec[::2]
+            _chase = (list(range(len(_canes))) + list(range(len(_canes) - 2, 0, -1))) or [0]
+            for i, t in enumerate(grid):
+                nxt = grid[i + 1] if i + 1 < len(grid) else min(b, t + (1 if per_beat else 2) * _beat_s)
                 if nxt - t < VOICE_MOTION_MIN_GAP_S or any(x0 <= t < x1 for x0, x1 in _blk):
                     continue
                 t0, t1 = int(t * 1000), int(nxt * 1000)
                 ph = beat_phase(t, every=2)
-                # ONE chunk per move, from one end to the other over the half
-                # note (chunk_* keys: Fill + an Offset ramp) -- the Bars version
-                # tiled and wrapped, so several bands moved at once.
-                for j, m in enumerate(_canes):
-                    k = ph if step == "updown" else (ph + j) % 2
-                    key = ("chunk_up", "chunk_down")[k]
-                    add(m, L_MOTION, key, t0, t1, _sc_pal(_cols[(i + j) % len(_cols)]),
-                        chunk_extra(m, key))
-                    _n += 1
-                sideways = (i // 4) % 2 == 1                          # 2 bars each
-                for j, m in enumerate(_trees):
-                    key = (("chunk_left", "chunk_right") if sideways
-                           else ("chunk_up", "chunk_down"))[ph]
-                    add(m, L_MOTION, key, t0, t1, _sc_pal(_cols[i % len(_cols)]),
-                        chunk_extra(m, key))
+                col = _cols[i % len(_cols)]
+                if step in ("together", "mirror"):
+                    for j, m in enumerate(_canes):
+                        k = ph if step == "together" else (ph + j) % 2
+                        key = ("chunk_up", "chunk_down")[k]
+                        add(m, L_MOTION, key, t0, t1, _sc_pal(_cols[(i + j) % len(_cols)]),
+                            chunk_extra(m, key, 0.10))
+                        _n += 1
+                    sideways = (i // 4) % 2 == 1                      # 2 bars each
+                    for j, m in enumerate(_trees):
+                        k = ph if step == "together" else (ph + j) % 2
+                        key = (("chunk_left", "chunk_right") if sideways
+                               else ("chunk_up", "chunk_down"))[k]
+                        add(m, L_MOTION, key, t0, t1, _sc_pal(col), chunk_extra(m, key, 0.10))
+                        _n += 1
+                    continue
+                side = i % 2                                          # 0 = left, 1 = right
+                if step == "chase":
+                    movers = [_canes[_chase[i % len(_chase)]]] if _canes else []
+                else:
+                    movers = list(_left if side == 0 else _right)
+                movers = movers + ([_trees[side % len(_trees)]] if _trees else [])
+                for m in movers:
+                    if step == "flash_lr":
+                        add(m, L_PULSE, "on_hit", t0, t0 + min(t1 - t0, 260), _sc_pal(col))
+                    else:
+                        key = "chunk_up" if (i // 2) % 2 == 0 else "chunk_down"
+                        if m in _trees and (i // 8) % 2 == 1:
+                            key = "chunk_left" if (i // 2) % 2 == 0 else "chunk_right"
+                        add(m, L_MOTION, key, t0, t1, _sc_pal(col), chunk_extra(m, key, 0.10))
                     _n += 1
             _n_sec += 1
         if _n:

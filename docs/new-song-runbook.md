@@ -1101,3 +1101,34 @@ the new parts:
   Shards / Solar Wind first rendered 0.35 / 0.20 after Ripple Grid's 0.52 --
   a climax that dims. Rendered matrix level is ~0.65-0.8 of a numpy emulation
   of the .fs (palette colours are not white); aim the emulation high.
+
+### Round 4 on rev3 (2026-10-11)
+
+- **Phrase boundaries come from the DROP, not the tracker's downbeats.** Light
+  Of Day's drop lands on the tracker's beat 3 (its bar phase is two beats off),
+  so its "downbeats" put chorus 2 and the heavy section 1.1 s late ("the shader
+  changes too late") and the strings were read a bar early. Count 8-bar phrases
+  from the drop: 1997.46 + 8/16/24 bars = 2015.26 / 2033.04 (the hats drop out
+  there) / 2050.83 (the final chord drops away) -- rendered within 20 ms.
+- **Dancers need a repertoire, not one gesture**: per section one of together /
+  mirror / lr_pairs (left canes + tree 1, then right canes + tree 2, per beat,
+  like the gutters) / flash_lr / chase (one cane at a time, ping-pong), never
+  the same twice running; a THIN line (10% of the prop, not 25%: "blocky"). In
+  the works: three ideas rotating by bar. Inside a dance section the step owns
+  the props' flashes too -- generic every-beat accents lit both pairs on every
+  beat and hid the left/right alternation.
+- **A countdown on the matrices** (`add_countdown.py`, run on the MERGED xsq
+  after merge_medley): one image per second per matrix at its exact light grid
+  (strands x nodes per strand), squeezed by the pixel aspect (ScaleX/ScaleY:
+  the fences are 1.2-1.4x wide), DIN Alternate Bold at ~85% height, Pictures
+  effect Scale To Fit on a new TOP layer, opaque. Ticks on whole seconds
+  before the zero; gold for the last ten; 0:00 exactly on the zero, faded out
+  in 0.4 s. NB: reading a matrix back from the fseq, Dir="R" strands run right
+  to left -- the printout is mirrored, the display is not.
+- **Submodel GROUPS paint over a prop too.** The canes' submodel groups ("GE
+  Insane Cane Circles GRP", "...Half Shell Up/Down GRP") sit below the cane
+  rows and kept both pairs 27-58% lit through every beat, so a left/right step
+  never read even with black underneath. The dance pass now clears every
+  group whose members are all dancers or their submodels (plus switched-off
+  props), and the dancers' submodel rows; grafted songs take those rows too
+  (dance_rows.py). Rendered after: canes dark between their own beats.
