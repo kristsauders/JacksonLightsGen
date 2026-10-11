@@ -450,6 +450,26 @@ EFFECTS: dict[str, tuple[str, dict]] = {
     "bars_down_in":   ("Bars", _bars("down", buffer=PERMODEL)),
     # Side to side INSIDE one prop (Krists's own Pink Pony Club does exactly
     # this on the mini trees: Bars Left/Right on each tree's own buffer).
+    # ONE CHUNK, END TO END. Bars tiles its palette and wraps, so a "bar" is
+    # always several bands with one leaving an edge while another enters --
+    # "multiple bars moving on them... not synced to start at the top and end
+    # the beat on the bottom". Fill draws from `Offset` outward: Band_Size px
+    # lit, then Skip_Size (250, i.e. the rest) black, Wrap off, colour from
+    # the band not the position. A Ramp on Fill_Offset (placed per prop, see
+    # _chunk_extra) carries that one chunk from one end to the other over
+    # exactly the effect's span. (src-core/effects/FillEffect.cpp)
+    "chunk_up":    ("Fill", {**PERMODEL, "E_CHOICE_Fill_Direction": "Up", "E_SLIDER_Fill_Position": "100",
+                             "E_SLIDER_Fill_Skip_Size": "250", "E_CHECKBOX_Fill_Wrap": "0",
+                             "E_CHECKBOX_Fill_Offset_In_Pixels": "0", "E_CHECKBOX_Fill_Color_Time": "1"}),
+    "chunk_down":  ("Fill", {**PERMODEL, "E_CHOICE_Fill_Direction": "Down", "E_SLIDER_Fill_Position": "100",
+                             "E_SLIDER_Fill_Skip_Size": "250", "E_CHECKBOX_Fill_Wrap": "0",
+                             "E_CHECKBOX_Fill_Offset_In_Pixels": "0", "E_CHECKBOX_Fill_Color_Time": "1"}),
+    "chunk_left":  ("Fill", {**PERMODEL, "E_CHOICE_Fill_Direction": "Left", "E_SLIDER_Fill_Position": "100",
+                             "E_SLIDER_Fill_Skip_Size": "250", "E_CHECKBOX_Fill_Wrap": "0",
+                             "E_CHECKBOX_Fill_Offset_In_Pixels": "0", "E_CHECKBOX_Fill_Color_Time": "1"}),
+    "chunk_right": ("Fill", {**PERMODEL, "E_CHOICE_Fill_Direction": "Right", "E_SLIDER_Fill_Position": "100",
+                             "E_SLIDER_Fill_Skip_Size": "250", "E_CHECKBOX_Fill_Wrap": "0",
+                             "E_CHECKBOX_Fill_Offset_In_Pixels": "0", "E_CHECKBOX_Fill_Color_Time": "1"}),
     "bars_left_in":   ("Bars", _bars("Left", buffer=PERMODEL)),
     "bars_right_in":  ("Bars", _bars("Right", buffer=PERMODEL)),
     # --- rhythmic bars, from Krists's own sequences -------------------------
@@ -2646,6 +2666,52 @@ SYMMETRY_FAMILIES: dict[str, list[str]] = {
 _INACTIVE_MODELS: set[str] | None = None
 
 
+_BUF_DIMS: dict[str, tuple[int, int]] = {}
+
+
+def buffer_dims(model: str) -> tuple[int, int]:
+    """(width, height) of a model's DEFAULT render buffer, from the layout:
+    Custom = its grid; a Tree / vertical-strand model = strands x nodes per
+    strand, the strand COUNT taken from the real node count (a Tree's string
+    count is not always an attribute: Mini Tree = 1200 nodes / 20 = 60
+    strands). Used to size a Fill band in pixels."""
+    if not _BUF_DIMS:
+        x = (SHOW_PATH / "xlights_rgbeffects.xml").read_text(errors="ignore")
+        try:
+            cm = json.loads((SHOW_PATH / ".generation" / "channel_map.json").read_text())["models"]
+        except Exception:
+            cm = {}
+        for m in re.finditer(r"<model ([^>]*)>", x):
+            at = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+            n = at.get("name")
+            if not n:
+                continue
+            try:
+                if at.get("DisplayAs") == "Custom":
+                    _BUF_DIMS[n] = (int(at.get("CustomWidth", 1)), int(at.get("CustomHeight", 1)))
+                elif "NodesPerString" in at and "StrandsPerString" in at:
+                    per = max(1, int(at["NodesPerString"]) // max(1, int(at["StrandsPerString"])))
+                    strands = int(at["StrandsPerString"])
+                    if n in cm:
+                        strands = max(strands, (cm[n]["count"] // 3) // per)
+                    _BUF_DIMS[n] = (strands, per)
+            except ValueError:
+                pass
+    return _BUF_DIMS.get(model, (20, 20))
+
+
+def chunk_extra(model: str, key: str, frac: float = 0.25) -> dict:
+    """Band size + the Offset ramp that carries ONE chunk of `frac` of the prop
+    from one end to the other over the effect (see the chunk_* keys)."""
+    w, h = buffer_dims(model)
+    span = w if key in ("chunk_left", "chunk_right") else h
+    band = max(1, min(250, int(round(span * frac))))
+    end = 100.0 * max(0, span - band) / max(1, span - 1)
+    return {"E_SLIDER_Fill_Band_Size": str(band),
+            "E_VALUECURVE_Fill_Offset": ("Active=TRUE|Id=ID_VALUECURVE_Fill_Offset|Type=Ramp|"
+                                         f"Min=0.00|Max=100.00|P1=0.00|P2={end:.2f}|RV=TRUE|")}
+
+
 def inactive_models() -> set[str]:
     """Models Krists has switched off. They render nothing, so an effect on one
     is simply thrown away -- measured, the three retired Front Window Matrices
@@ -4288,6 +4354,17 @@ def main():
         except Exception as _e:
             print(f"  (could not sync sections into analysis.json: {_e})")
     cues = json.loads((GEN_DIR / "cues.json").read_text())
+    # DRUMS ONLY (design key `drums_only`). "Nuevayol seems a bit chaotic...
+    # we might be keying off something other than drums... focus on that and
+    # not other extraneous vocals and effects". Measured on its drum stem: a
+    # snare/clap on every quarter note with 16th rolls between, and an 808 that
+    # wanders -- while the props flashed on bass, chords, vocals, synth stabs,
+    # arpeggios and fast risers. With the key set, only the kick and snare
+    # voices drive anything rhythmic; the melodic cue passes stand down.
+    DRUMS_ONLY = bool(MEDLEY and MEDLEY.get("drums_only"))
+    if DRUMS_ONLY:
+        for _ck in ("arpeggios", "bass_arpeggios", "synth_stabs", "fast_risers"):
+            cues[_ck] = []
     # Every moment a drop could land on, used by change_marks() to keep a
     # pattern change from happening just BEFORE one.
     _drop_marks = sorted({round(float(ev["drop_time"]), 2)
@@ -5013,6 +5090,11 @@ def main():
         voices = {k: v for k, v in voices.items() if k not in DISABLED_VOICES}
         if _dropped:
             print(f"Voices disabled: {', '.join(_dropped)} (see DISABLED_VOICES)")
+    if DRUMS_ONLY:
+        _gone = [v for v in voices if v not in ("kick", "snare")]
+        voices = {k: v for k, v in voices.items() if k in ("kick", "snare")}
+        if _gone:
+            print(f"Drums only: {', '.join(_gone)} voices stand down")
     voice_props, voice_extra_props = assign_voices_to_props(
         voices, cast, random.Random(f"{SONG_NAME}|voice-assign"))
     # Reverse lookup: which voice (if any) does this prop represent all song?
@@ -5431,6 +5513,8 @@ def main():
     else:
         melody_notes = extract_melody_notes(stem_dir, analysis.sections, beat_ms)
         melody_cache.write_text(json.dumps(melody_notes))
+    if DRUMS_ONLY:
+        melody_notes = []
     print(f"Melody notes detected: {len(melody_notes)}")
 
     _beats_arr = np.asarray(beats, dtype=float) if beats else np.array([0.0])
@@ -10185,7 +10269,7 @@ def main():
     # vocals if they have a clear rhythm."
     n_phrase = 0
     vocal_target = voice_props.get("vocal")
-    if vocal_target and vocal_phrases_list:
+    if vocal_target and vocal_phrases_list and not DRUMS_ONLY:
         for p in vocal_phrases_list:
             s_ms = int(p["start"] * 1000)
             e_ms = min(int(p["end"] * 1000), s_ms + int(bar_s * 1000))
@@ -14082,6 +14166,13 @@ def main():
 
     _SC_DEAD = inactive_models()
 
+    def _sc_groups() -> dict:
+        try:
+            return json.loads((SHOW_PATH / ".generation" / "layout.json").read_text()).get(
+                "xlights_model_groups", {}) or {}
+        except Exception:
+            return {}
+
     def _sc_live(m: str) -> bool:
         return (m.split("/")[0] not in _SC_DEAD and not m.startswith("Tunnel Arches")
                 and m != "Tunnel")
@@ -14528,6 +14619,8 @@ def main():
         smalls = [m for m in _SC_PROPS if m.startswith(("Orb-", "Flake I"))]
         dancers = [m for m in _SC_PROPS if m in ("Mini Tree 1", "Mini Tree 2")
                    or re.fullmatch(r"GE Insane Cane \d", m)]
+        for m in dancers:
+            _put(m, "off", w0, w1, _sc_pal("#000000"), layer=6)
         bar_i = -1
         n = 0
         for k, t in enumerate(bts):
@@ -14571,10 +14664,10 @@ def main():
                 # per-model bars (As Pixel made each tree ONE pixel -- a blink);
                 # the trees go side to side on every other bar
                 if m.startswith("Mini Tree") and bar_i % 2 == 1:
-                    key = "bars_left_in" if k % 2 == 0 else "bars_right_in"
+                    key = "chunk_left" if k % 2 == 0 else "chunk_right"
                 else:
-                    key = "bars_up_in" if k % 2 == 0 else "bars_down_in"
-                _put(m, key, t, nb, _sc_pal(c1 if j % 2 == 0 else c2, "#000000", "#000000"))
+                    key = "chunk_up" if k % 2 == 0 else "chunk_down"
+                _put(m, key, t, nb, _sc_pal(c1 if j % 2 == 0 else c2), chunk_extra(m, key))
             # small props pop in pairs
             for j, m in enumerate(smalls):
                 if (j + k) % 2 == 0:
@@ -14738,10 +14831,55 @@ def main():
             m.startswith(("Vertical Strip", "Single Line-"))
             or m.endswith(("/Verticals", "/Horizontals")))], key=_sc_x)
         verts = [m for m in outl if m.startswith("Vertical Strip")]
-        n = 0
+        # THE ROLL. "accentuate the drum fills more with some craziness...
+        # randomly flash the floods... one drum hit per flood, or use the props
+        # for that too so it's like a roll or individual props flashing all
+        # over during the drum fill". Every drum hit in the fill fires ONE flood
+        # (walking a shuffled order) and three random props; the props are
+        # cleared for the fill so each hit is a spark on a dark house.
+        roll = [m for m in _SC_PROPS if m not in outl and m not in _SC_CANVAS
+                and not m.startswith(("Flood-", "Tunnel", "Mega Tree"))
+                and "matrix" not in m.lower()]
+        _rr = random.Random(f"{SONG_NAME}|fill-roll")
+        _fl = list(_SC_FLOODS); _rr.shuffle(_fl)
+        _hit_src = [v for v in ("kick", "snare") if v in voices]
+        n = n_roll = 0
         for a, b in sc["spans"]:
-            _sc_slate(effects, a, b, keep=lambda e: e.model_name not in outl,
+            _gone = set(roll) | set(_SC_FLOODS)
+            # GROUPS made only of these props go too: xLights paints rows in
+            # sequence order and a group row BELOW its members wins -- the
+            # "Floods" group's chorus wash covered the per-flood black and all
+            # nine floods stayed lit through the fills. Whole-house groups
+            # (ALL Display etc.) keep running.
+            _grp_gone = {g for g, mem in _sc_groups().items()
+                         if mem and set(mem) <= (_gone | set(outl) | _SC_DEAD)}
+            _sc_slate(effects, a, b, keep=lambda e: e.model_name not in outl
+                      and e.model_name.split("/")[0] not in _gone
+                      and e.model_name not in _grp_gone,
                       why="drum fill", split=True)
+            # black UNDER them (model-level beats any group wash): measured,
+            # all nine floods stayed lit through the fills from the chorus's
+            # group-level washes, so one flood per hit could not read
+            for m in list(_SC_FLOODS) + roll:
+                _put(m, "off", a, b, _sc_pal("#000000"), layer=6)
+            hits = sorted(x for v in _hit_src for x in voices[v].in_window(a, b))
+            th = []
+            for x in hits:
+                if not th or x - th[-1] >= 0.07:
+                    th.append(x)
+            if len(th) < 6:                       # too few detected: 16ths
+                th = list(np.arange(a, b - 0.05, beat_ms / 4000.0))
+            last = []
+            for i, h in enumerate(th):
+                c = cols[i % len(cols)]
+                if _fl:
+                    _put(_fl[i % len(_fl)], "sc_on", h, h + 0.16, _sc_pal(c), _sc_fade(0.0, 0.12), layer=0)
+                pick = [m for m in _rr.sample(roll, min(len(roll), 6)) if m not in last][:3]
+                for m in pick:
+                    _put(m, "sc_on", h, h + 0.14, _sc_pal(cols[(i + 1) % len(cols)]),
+                         _sc_fade(0.0, 0.1), layer=0)
+                last = pick
+                n_roll += 1
             for m in outl:
                 _put(m, "off", a, b, _sc_pal("#000000"), layer=6)
             bts = _sc_beats(a, b) or [a]
@@ -14770,7 +14908,8 @@ def main():
                              _sc_pal(c1 if m in verts else c2), _sc_fade(0.0, L * 0.3))
                 n += 1
         print(f"Medley fills: {len(sc['spans'])} drum fills on {len(outl)} outline models "
-              f"({n} beats), model-level so no house shader shows through")
+              f"({n} beats), model-level so no house shader shows through; a roll of "
+              f"{n_roll} drum hits across {len(_SC_FLOODS)} floods and {len(roll)} props")
 
     # -- hold: the last hit rings out, frozen ----------------------------------
     def _scene_hold(sc):
@@ -15398,15 +15537,24 @@ def main():
                 continue
             if _drv is None or len(_drv.in_window(a, b)) < 4 or sec.energy_level < 0.45:
                 continue
-            # the voice motion these props had in this section goes
+            # the voice motion these props had in this section goes -- and
+            # anything on the "Mini Trees" / "Candy Canes" GROUP rows, which
+            # sit below the member rows and so paint over the black underlay
             _keep = []
             for e in effects:
-                if (e.layer == L_MOTION and e.model_name.split("/")[0] in _all
-                        and e.start_time_ms >= a * 1000 - 1 and e.start_time_ms < b * 1000):
+                _in = e.start_time_ms >= a * 1000 - 1 and e.start_time_ms < b * 1000
+                if _in and ((e.layer == L_MOTION and e.model_name.split("/")[0] in _all)
+                            or e.model_name in _groups):
                     _cut += 1
                     continue
                 _keep.append(e)
             effects[:] = _keep
+            # Black UNDER the dancers for the section: the chunk's black is
+            # transparent, and measured the trees sat at 0.3 everywhere and the
+            # canes 45-80% lit from beds and group washes, so the one chunk did
+            # not read as the only thing moving. The beat flashes sit above.
+            for m in _trees + _canes:
+                add(m, 6, "off", int(a * 1000), int(b * 1000), PALETTES["ice"])
             # Canes: up/down, all together or mirrored. Trees: up/down for
             # two bars, then side to side for two. EVERY move is a Bars bar
             # travelling INSIDE the prop's own buffer -- v8 used the stock
@@ -15423,17 +15571,21 @@ def main():
                     continue
                 t0, t1 = int(t * 1000), int(nxt * 1000)
                 ph = beat_phase(t, every=2)
+                # ONE chunk per move, from one end to the other over the half
+                # note (chunk_* keys: Fill + an Offset ramp) -- the Bars version
+                # tiled and wrapped, so several bands moved at once.
                 for j, m in enumerate(_canes):
                     k = ph if step == "updown" else (ph + j) % 2
-                    add(m, L_MOTION, ("bars_up_in", "bars_down_in")[k], t0, t1,
-                        _sc_pal(_cols[(i + j) % len(_cols)], "#000000", "#000000"))
+                    key = ("chunk_up", "chunk_down")[k]
+                    add(m, L_MOTION, key, t0, t1, _sc_pal(_cols[(i + j) % len(_cols)]),
+                        chunk_extra(m, key))
                     _n += 1
                 sideways = (i // 4) % 2 == 1                          # 2 bars each
                 for j, m in enumerate(_trees):
-                    key = (("bars_left_in", "bars_right_in") if sideways
-                           else ("bars_up_in", "bars_down_in"))[ph]
-                    add(m, L_MOTION, key, t0, t1,
-                        _sc_pal(_cols[i % len(_cols)], "#000000", "#000000"))
+                    key = (("chunk_left", "chunk_right") if sideways
+                           else ("chunk_up", "chunk_down"))[ph]
+                    add(m, L_MOTION, key, t0, t1, _sc_pal(_cols[i % len(_cols)]),
+                        chunk_extra(m, key))
                     _n += 1
             _n_sec += 1
         if _n:

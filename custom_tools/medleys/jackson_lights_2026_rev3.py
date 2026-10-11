@@ -105,7 +105,14 @@ DESIGN: dict[str, dict] = {
                       712.64: {'palette': 'boricua', 'shader': 'shader_fracture'}},
      'drops': [679.59],
      'climax': [679.59],
-     'pulse_mode': 'groove'},
+     # rev3 review: "chaotic... keying off something other than drums". Its drum
+     # stem: a snare/clap on EVERY quarter note (0.511 s), 16th rolls between,
+     # an 808 that wanders. So: accents on the quarter-note grid, voices only on
+     # beats, and nothing melodic (bass/chord/vocal voices, stabs, arpeggios,
+     # risers) drives anything.
+     'pulse_mode': 'quarter',
+     'voice_on_beat': True,
+     'drums_only': True},
 
     # =====================================================================
     # 09  CloZee & LSDREAM - ENIGMA   12:12.7 - 14:21.3   identical, old design -47.6 s
@@ -523,8 +530,18 @@ DESIGN: dict[str, dict] = {
     # 34:46.70 (-17 -> -27 dB in 0.3 s; v13's 27:45.0 was the same moment) -- the
     # stillness is pinned there, the fade starts 0.61 s later as in v13.
     # =====================================================================
+    # Climax (Krists, rev3 review: "we have the same shader for all three of those
+    # sections... this is the big climax of the show and we want it to be impactful
+    # and memorable"): three 8-bar sections, each its own look, escalating --
+    #   33:17.5 chorus 1  Ripple Grid (the v13 look)
+    #   33:36.4 chorus 2  Light Shards (new: prismatic shafts sweeping the house)
+    #   33:54.1 the heavy section (bass up, mids/hats out)  Solar Wind (new: a storm
+    #           of light rushing across, flipping direction on the beat), in 'blaze'
+    # The build keeps the intro's Rain on Glass so the drop REVEALS Ripple Grid.
     '21 Light Of Day': {'palettes': {'daybreak': ['#FFC857', '#FF9F80', '#87CEEB'],
-                   'firstlight': ['#87CEEB', '#FFF1C1', '#FFB38A']},
+                   'firstlight': ['#87CEEB', '#FFF1C1', '#FFB38A'],
+                   'blaze': ['#FFD000', '#FF3D00', '#2050FF']},
+      'extra_shaders': ['Light Shards', 'Solar Wind'],
       'palette_family': ['daybreak', 'firstlight'],
       'shader_pool': ['aurora_curtain', 'falling_embers', 'rain_on_glass', 'ripple_grid'],
       'sections': [(1941.16, 'intro'),
@@ -532,14 +549,16 @@ DESIGN: dict[str, dict] = {
                    (1985.23, 'build'),
                    (1991.89, 'break'),
                    (1997.46, 'chorus'),
+                   (2016.37, 'chorus'),
                    (2034.12, 'chorus'),
                    (2049.69, 'outro')],
       'section_look': {1941.16: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
                        1952.07: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
-                       1985.23: {'palette': 'firstlight', 'shader': 'shader_ripple_grid'},
+                       1985.23: {'palette': 'firstlight', 'shader': 'shader_rain_on_glass'},
                        1991.89: {'palette': 'daybreak', 'shader': 'shader_rain_on_glass'},
                        1997.46: {'palette': 'daybreak', 'shader': 'shader_ripple_grid'},
-                       2034.12: {'palette': 'daybreak', 'shader': 'shader_ripple_grid'},
+                       2016.37: {'palette': 'daybreak', 'shader': 'shader_light_shards'},
+                       2034.12: {'palette': 'blaze', 'shader': 'shader_solar_wind'},
                        2049.69: {'palette': 'daybreak', 'shader': 'shader_aurora_curtain'}},
       'ambient': [(1941.16, 1997.46), (2049.69, 2145.22)],
       'drops': [1997.46],

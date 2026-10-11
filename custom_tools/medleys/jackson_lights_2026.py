@@ -147,8 +147,14 @@ DESIGN: dict[str, dict] = {
                         131.46, 136.20, 137.82, 138.61, 140.26, 143.60, 144.90, 146.29,
                         147.38, 148.34, 149.37, 150.84, 154.01, 155.34, 157.90, 159.54,
                         162.85],
-             # stages on bar lines: each changes colours and adds one element
-             "stages": [95.89, 110.35, 121.82, 133.65, 143.94, 154.07],
+             # stages on the VOCAL PHRASES (rev3 review: "switch the look right
+             # as he's starting a new phrase"): the vocal stem's onsets after
+             # each silence, -30 ms stem latency. Bar lines had put 110.35 2.3 s
+             # before line 2, 121.82 2 s into "I need to leap...", 133.65 1.9 s
+             # early. NB: edited straight into .jl26/02's medley.json -- never
+             # re-run medley_prep for this OLD mix: .jl26/15 now holds rev3's
+             # Light Of Day.
+             "stages": [95.89, 104.13, 119.55, 135.41, 142.81, 153.47],
              "build": [163.47, 171.26], "build2": 171.26, "rise_from": 176.30},
             {"kind": "frenzy",
              "hits": [178.160, 178.375, 178.594, 178.829, 179.053, 179.288],

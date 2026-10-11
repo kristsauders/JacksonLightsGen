@@ -1066,3 +1066,38 @@ the new parts:
   stop and start a speed-0 one with Offset = pos at that moment (mod 360);
   a crossfade to offset 0 "jumps back to 12 o'clock". Measured: frame change
   0.055 -> 0.000 at the stop.
+
+### Round 3 on rev3 (2026-10-11)
+
+- **One chunk end to end = Fill, not Bars.** Bars tiles the palette into
+  bands that scroll and WRAP (period = the prop), so a "bar" is always several
+  bands with one leaving an edge as another enters, and each effect restarts
+  its phase -- "multiple bars... not synced to start at the top and end the
+  beat on the bottom". `chunk_up/down/left/right`: Fill, Band_Size = 25% of
+  the prop in pixels (`buffer_dims`: Custom grid; Tree = strands x nodes per
+  strand, strands from the node count), Skip 250, Wrap OFF, Color_Time ON
+  (otherwise Fill recolours every row and the prop goes solid), and a Ramp on
+  Fill_Offset (percent) across the effect. Rendered: one band crossing the
+  tree per half note.
+- **A dancer needs black UNDER it.** The chunk's black is transparent; beds and
+  group washes lit the trees at 0.3 and the canes 45-80%. A model-level `off`
+  on the bottom layer for the section blanks everything below (group effects
+  too); the beat flashes sit above. Same for a drum-fill ROLL: all nine floods
+  stayed lit through the fills until each got an `off` underneath.
+- **Before trusting a grid offset, measure on the MIX.** The demucs drum stems
+  read +55-62 ms against the grid in EVERY song; on the wav it is +20-27 ms,
+  i.e. onset-detector lag. The grid was right; the stems are late.
+- **`drums_only`** (design key): kick + snare voices only; melodic cues
+  (synth stabs, arpeggios, fast risers), melody and vocal accents stand down.
+  NUEVAYoL (a clap on every quarter, 16th rolls, a wandering 808): 71% -> 94%
+  of flashes on a beat with quarter pulses + voice_on_beat.
+- **Lyric phrase timing**: whisper is too coarse (10 s chunks); use the vocal
+  STEM -- rms rise after >= 0.6 s of quiet, -30 ms stem latency. Phrase
+  starts are pickups, 0.2-0.3 s off the beat; put the look change ON them.
+- **graft_elements.py --window A,B [--window-models m|m]**: replace only what
+  starts in a time window (optionally only some props), for approved songs
+  where a full regeneration drifts elsewhere (Be With You's ending).
+- New climax shaders must be MEASURED against the section before them: Light
+  Shards / Solar Wind first rendered 0.35 / 0.20 after Ripple Grid's 0.52 --
+  a climax that dims. Rendered matrix level is ~0.65-0.8 of a numpy emulation
+  of the .fs (palette colours are not white); aim the emulation high.
