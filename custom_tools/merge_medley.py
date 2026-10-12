@@ -21,6 +21,8 @@ Merging rules, each for a measured reason:
 * The ColorPalettes and EffectDB tables are positional lookups (`palette="N"`,
   `ref="N"`), so both are rebuilt globally with de-duplication and every
   reference is remapped.
+* A segment may carry a `time_map` ([[source_s, mix_s], ...]): its whole window
+  is copied from `xsq` through that map (see `splice` for the reasoning).
 * A segment may carry a `splice`: {"from": t, "xsq": path, "time_map": [[src_s,
   mix_s], ...]}. From `t` to the segment's end, effects come from that xsq
   instead, their times mapped through the piecewise-linear time_map (np.interp,
@@ -106,6 +108,12 @@ def main() -> None:
         if sp:
             sources.append((p["name"], p["xsq"], p["start"], sp["from"], shifter(p["audio_start"])))
             sources.append((p["name"] + " (splice)", sp["xsq"], sp["from"], p["end"], warper(sp["time_map"])))
+        elif p.get("time_map"):
+            # the whole segment copied from an EARLIER render through a time map
+            # (source-xsq seconds -> this mix's seconds): rev5 re-uses rev3's
+            # finished songs, some re-timed by the DJ (Never Forget You ~0.7%
+            # faster), exactly as they were.
+            sources.append((p["name"], p["xsq"], p["start"], p["end"], warper(p["time_map"])))
         else:
             sources.append((p["name"], p["xsq"], p["start"], p["end"], shifter(p["audio_start"])))
 

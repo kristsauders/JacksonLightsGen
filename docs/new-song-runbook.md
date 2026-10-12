@@ -1132,3 +1132,28 @@ the new parts:
   group whose members are all dancers or their submodels (plus switched-off
   props), and the dancers' submodel rows; grafted songs take those rows too
   (dance_rows.py). Rendered after: canes dark between their own beats.
+
+### rev5 (2026-10-12): a re-cut mix assembled from the finished one
+
+- When most songs survive, COPY them: a segment with `time_map` (source-xsq
+  seconds -> new mix seconds) takes its whole window from an earlier render.
+  Songs whose audio is unchanged at the start: the previous MERGED render with
+  an identity map (it carries grafts and the countdown). Moved songs: their
+  per-song xsq (slice time, with 10 s of padding either side for new cut
+  points) through a shift or a measured map.
+- **Map shapes**: constant where the DJ did not touch the tempo (verify with a
+  frame-shift scan: Sleigh Ride was one frame off at the coarse offset, best
+  at +25 ms everywhere); a STRAIGHT-LINE fit where it drifts (Never Forget You
+  0.7% faster, Happy Holidays 0.55 s over 80 s). Never interpolate raw 2 s
+  chroma points -- +-50 ms jitter moved shaders (mean 13/255 off), and a map
+  that starts at the first confident point extrapolates its noisy first slope.
+- **Split a re-timed song at a scene boundary with a constant offset per part**
+  rather than stretching a pinwheel: Light Of Day's climax at -625.30 and its
+  strings at -625.40 (the stop measured with the same detector in both mixes),
+  boundary placed where the scene starts IN THE SOURCE so nothing is clipped
+  -- a clipped start shifts a turning pinwheel's angle and the freeze jumps.
+- New audio before a moved song (Happy Holidays' intro grew 10.5 -> 30 s):
+  generate that song on the new slice under a NEW path (.jl26r5) and use only
+  the new window; the old visuals take over at the old intro boundary.
+- Freed shaders are re-usable: songs that leave release theirs (Kids took
+  Heart Lattice, Ink Bloom, Interference).
